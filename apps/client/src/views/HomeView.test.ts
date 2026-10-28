@@ -1,7 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { createPinia } from 'pinia';
+import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createRouter } from 'vue-router';
+import { useAuthStore } from '@/stores/auth';
 import HomeView from './HomeView.vue';
 
 class SilentSocket {
@@ -27,9 +28,23 @@ function createTestRouter() {
     history: createMemoryHistory(),
     routes: [
       { path: '/', name: 'home', component: HomeView },
+      { path: '/auth', name: 'auth', component: { template: '<div />' } },
       { path: '/game/:code', name: 'game', component: { template: '<div />' } },
     ],
   });
+}
+
+function authenticatedPinia(): ReturnType<typeof createPinia> {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  useAuthStore().user = {
+    id: 'usr_1',
+    email: 'anya@example.com',
+    name: 'Аня',
+    guest: false,
+    createdAt: 0,
+  };
+  return pinia;
 }
 
 beforeEach(() => {
@@ -47,7 +62,7 @@ describe('HomeView', () => {
   it('нормализует код комнаты при вводе', async () => {
     const router = createTestRouter();
     await router.push('/');
-    const wrapper = mount(HomeView, { global: { plugins: [createPinia(), router] } });
+    const wrapper = mount(HomeView, { global: { plugins: [authenticatedPinia(), router] } });
     const codeInput = wrapper.find('input[placeholder="ABC234"]');
 
     await codeInput.setValue('abc-234');
@@ -63,8 +78,7 @@ describe('HomeView', () => {
           JSON.stringify({
             gameId: 'game-1',
             code: 'QWE234',
-            playerId: 'player-1',
-            token: 'token-1',
+            playerId: 'usr_1',
             mark: 'X',
           }),
           { status: 201, headers: { 'content-type': 'application/json' } },
@@ -74,9 +88,8 @@ describe('HomeView', () => {
 
     const router = createTestRouter();
     await router.push('/');
-    const wrapper = mount(HomeView, { global: { plugins: [createPinia(), router] } });
+    const wrapper = mount(HomeView, { global: { plugins: [authenticatedPinia(), router] } });
 
-    await wrapper.find('input[autocomplete="nickname"]').setValue('Аня');
     await wrapper.find('form.create').trigger('submit');
     await flushPromises();
 
@@ -84,7 +97,7 @@ describe('HomeView', () => {
     expect(router.currentRoute.value.params.code).toBe('QWE234');
   });
 
-  it('не отправляет запрос без имени', async () => {
+  it('без авторизации показывает приглашение войти вместо форм', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
 
@@ -92,10 +105,8 @@ describe('HomeView', () => {
     await router.push('/');
     const wrapper = mount(HomeView, { global: { plugins: [createPinia(), router] } });
 
-    await wrapper.find('form.create').trigger('submit');
-    await flushPromises();
-
+    expect(wrapper.find('form.create').exists()).toBe(false);
+    expect(wrapper.text()).toContain('Создать аккаунт');
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain('Введите имя');
   });
 });

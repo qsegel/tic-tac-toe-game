@@ -16,8 +16,8 @@ import {
 import { GameError } from '../src/types.js';
 import type { Cell, Game, Mark } from '../src/index.js';
 
-const HOST = { playerId: 'p1', name: 'Аня', token: 'token-1' };
-const GUEST = { playerId: 'p2', name: 'Боб', token: 'token-2' };
+const HOST = { playerId: 'p1', name: 'Аня' };
+const GUEST = { playerId: 'p2', name: 'Боб' };
 
 function newGame(): Game {
   return createGame({ id: 'game-1', code: 'ABC234', host: makeSlot(HOST), now: 1_000 });
@@ -45,6 +45,7 @@ test('createGame: пустое поле, ждём соперника, X начи
   assert.equal(game.board.length, 9);
   assert.ok(game.board.every((cell) => cell === null));
   assert.equal(game.turn, 'X');
+  assert.equal(game.round, 1);
   assert.equal(game.players.O, null);
   assert.equal(game.players.X.name, 'Аня');
   assert.equal(markOf(game, HOST.playerId), 'X');
@@ -61,12 +62,12 @@ test('joinGame: второй игрок запускает партию', () => 
 
 test('joinGame: третий игрок получает ROOM_FULL', () => {
   const game = newPlayingGame();
-  expectCode(() => joinGame(game, makeSlot({ playerId: 'p3', name: 'Вика', token: 't3' }), 3_000), 'ROOM_FULL');
+  expectCode(() => joinGame(game, makeSlot({ playerId: 'p3', name: 'Вика' }), 3_000), 'ROOM_FULL');
 });
 
 test('joinGame: после старта третьему игроку нет места', () => {
   const game = play(newPlayingGame(), HOST.playerId, 0);
-  expectCode(() => joinGame(game, makeSlot({ playerId: 'p3', name: 'Вика', token: 't3' }), 3_000), 'ROOM_FULL');
+  expectCode(() => joinGame(game, makeSlot({ playerId: 'p3', name: 'Вика' }), 3_000), 'ROOM_FULL');
 });
 
 test('checkWinner: все восемь линий', () => {
@@ -180,6 +181,8 @@ test('startRematch: один голос не перезапускает парт
   assert.equal(second.game.winningLine, null);
   assert.ok(second.game.board.every((cell) => cell === null));
   assert.deepEqual(second.game.rematchVotes, []);
+  assert.equal(second.game.round, 2);
+  assert.equal(toPublicGame(second.game).round, 2);
   assert.equal(markOf(second.game, HOST.playerId), 'O');
   assert.equal(markOf(second.game, GUEST.playerId), 'X');
 });
@@ -221,13 +224,12 @@ test('sanitizeName: обрезает, схлопывает пробелы и о�
   assert.equal(sanitizeName('a\u0000b'), 'a b');
 });
 
-test('toPublicGame: не отдаёт токены и playerId', () => {
+test('toPublicGame: не отдаёт playerId', () => {
   const game = newPlayingGame();
   const pub = toPublicGame(game);
   const serialized = JSON.stringify(pub);
-  assert.ok(!serialized.includes(HOST.token));
-  assert.ok(!serialized.includes(GUEST.token));
   assert.ok(!serialized.includes(HOST.playerId));
+  assert.ok(!serialized.includes(GUEST.playerId));
   assert.equal(pub.players.X.name, 'Аня');
   assert.equal(pub.players.O?.name, 'Боб');
   assert.equal(pub.rematchVotes.length, 0);

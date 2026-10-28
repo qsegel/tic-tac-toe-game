@@ -5,9 +5,7 @@ const session: Session = {
   gameId: 'game-1',
   code: 'ABC234',
   playerId: 'player-1',
-  token: 'token-1',
   mark: 'X',
-  name: 'Аня',
 };
 
 beforeEach(() => {
@@ -43,9 +41,9 @@ describe('session', () => {
     expect(loadSession('ABC234')).toBeNull();
   });
 
-  it('игнорирует сессию без токена', () => {
-    const { token: _token, ...withoutToken } = session;
-    sessionStorage.setItem('ttt:session:ABC234', JSON.stringify(withoutToken));
+  it('игнорирует сессию без playerId', () => {
+    const { playerId: _playerId, ...withoutPlayer } = session;
+    sessionStorage.setItem('ttt:session:ABC234', JSON.stringify(withoutPlayer));
 
     expect(loadSession('ABC234')).toBeNull();
   });

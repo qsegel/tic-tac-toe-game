@@ -8,6 +8,13 @@ export type ErrorCode =
   | 'BAD_REQUEST'
   | 'NOT_FOUND'
   | 'INVALID_TOKEN'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'ACCOUNT_REQUIRED'
+  | 'EMAIL_TAKEN'
+  | 'INVALID_CREDENTIALS'
+  | 'WEAK_PASSWORD'
+  | 'INVALID_EMAIL'
   | 'ROOM_FULL'
   | 'ROOM_LIMIT'
   | 'ALREADY_STARTED'
@@ -23,13 +30,13 @@ export type ErrorCode =
   | 'INTERNAL';
 
 /**
- * Внутреннее представление игрока. `token` — секрет для переподключения,
- * он НИКОГДА не попадает в публичный снапшот (`toPublicGame`).
+ * Внутреннее представление игрока. `playerId` — идентификатор аккаунта
+ * (`usr_…`) или гостя (`guest_…`), он НИКОГДА не попадает в публичный
+ * снапшот (`toPublicGame`).
  */
 export interface PlayerSlot {
   playerId: string;
   name: string;
-  token: string;
   connected: boolean;
   disconnectedAt: number | null;
 }
@@ -46,6 +53,8 @@ export interface Game {
   winningLine: number[] | null;
   /** Инкремент на каждое изменение: защита от гонок и двойных кликов. */
   version: number;
+  /** Номер раунда: каждый рематч начинает новый раунд. */
+  round: number;
   /** playerId-ы, нажавшие «ещё раз». */
   rematchVotes: string[];
   createdAt: number;
@@ -68,6 +77,7 @@ export interface PublicGame {
   winner: Winner | null;
   winningLine: number[] | null;
   version: number;
+  round: number;
   /** Метки игроков, нажавших «ещё раз»: клиент понимает, голосовал ли он сам. */
   rematchVotes: Mark[];
   createdAt: number;

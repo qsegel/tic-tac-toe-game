@@ -1,20 +1,26 @@
 <script setup lang="ts">
-import { CODE_ALPHABET, CODE_LENGTH, NAME_MAX_LENGTH } from '@ttt/shared';
-import { ref } from 'vue';
+import { CODE_ALPHABET, CODE_LENGTH } from '@ttt/shared';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import UiButton from '@/components/ui/UiButton.vue';
 import UiCard from '@/components/ui/UiCard.vue';
 import UiError from '@/components/ui/UiError.vue';
 import UiInput from '@/components/ui/UiInput.vue';
-import { loadName, saveName } from '@/lib/session';
+import { ApiError } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth';
 import { useGameStore } from '@/stores/game';
 
 const router = useRouter();
+const auth = useAuthStore();
 const store = useGameStore();
 
-const name = ref(loadName());
 const code = ref('');
 const busy = ref<'create' | 'join' | null>(null);
+
+const userLabel = computed(() => {
+  if (!auth.user) return '';
+  return auth.user.guest ? `${auth.user.name} (гость)` : auth.user.name;
+});
 
 function normalizeCode(value: string): string {
   return value
@@ -25,35 +31,32 @@ function normalizeCode(value: string): string {
     .slice(0, CODE_LENGTH);
 }
 
-function ensureName(): string | null {
-  const clean = name.value.trim();
-  if (!clean) {
-    store.setError('Введите имя');
-    return null;
+function goAuth(mode: 'login' | 'register' | 'guest'): void {
+  void router.push({
+    name: 'auth',
+    query: { mode, redirect: router.currentRoute.value.fullPath },
+  });
+}
+
+function handleError(cause: unknown): void {
+  if (cause instanceof ApiError && cause.status === 401) {
+    goAuth('login');
   }
-  saveName(clean);
-  return clean;
 }
 
 async function create(): Promise<void> {
-  const clean = ensureName();
-  if (!clean) return;
-
   busy.value = 'create';
   try {
-    const created = await store.create(clean);
+    const created = await store.create();
     await router.push({ name: 'game', params: { code: created } });
-  } catch {
-    // текст ошибки уже в store.error
+  } catch (cause) {
+    handleError(cause);
   } finally {
     busy.value = null;
   }
 }
 
 async function join(): Promise<void> {
-  const clean = ensureName();
-  if (!clean) return;
-
   if (code.value.length !== CODE_LENGTH) {
     store.setError(`Код комнаты состоит из ${CODE_LENGTH} символов`);
     return;
@@ -61,10 +64,10 @@ async function join(): Promise<void> {
 
   busy.value = 'join';
   try {
-    await store.join(code.value, clean);
+    await store.join(code.value);
     await router.push({ name: 'game', params: { code: code.value } });
-  } catch {
-    // текст ошибки уже в store.error
+  } catch (cause) {
+    handleError(cause);
   } finally {
     busy.value = null;
   }
@@ -83,44 +86,61 @@ async function join(): Promise<void> {
       </p>
     </section>
 
-    <UiCard>
-      <form class="create" @submit.prevent="create">
-        <UiInput
-          v-model="name"
-          label="Ваше имя"
-          :maxlength="NAME_MAX_LENGTH"
-          placeholder="Например, Аня"
-          autocomplete="nickname"
-        />
-
-        <UiButton type="submit" :disabled="busy !== null">
-          {{ busy === 'create' ? 'Создаём…' : 'Создать игру' }}
-        </UiButton>
-      </form>
-
-      <div class="divider"><span>или</span></div>
-
-      <form class="join" @submit.prevent="join">
-        <UiInput
-          v-model="code"
-          label="Код комнаты"
-          variant="code"
-          :normalize="normalizeCode"
-          placeholder="ABC234"
-          autocapitalize="characters"
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <UiButton variant="secondary" type="submit" :disabled="busy !== null">
-          {{ busy === 'join' ? 'Входим…' : 'Присоединиться' }}
-        </UiButton>
-      </form>
-
-      <UiError :message="store.error" />
+    <UiCard v-if="!auth.user">
+      <h2 class="home__title">Начнём?</h2>
+      <p class="muted">
+        Войдите в аккаунт, чтобы играть и сохранять историю, или зайдите гостем — без регистрации.
+      </p>
+      <div class="home__actions">
+        <UiButton block @click="goAuth('login')">Войти</UiButton>
+        <UiButton variant="secondary" block @click="goAuth('register')">Создать аккаунт</UiButton>
+        <UiButton variant="ghost" block @click="goAuth('guest')">Играть как гость</UiButton>
+      </div>
+      <UiError :message="auth.error" />
     </UiCard>
 
+    <template v-else>
+      <UiCard>
+        <div class="home__user">
+          <span class="muted">Вы вошли как</span>
+          <b>{{ userLabel }}</b>
+        </div>
+
+        <form class="create" @submit.prevent="create">
+          <UiButton type="submit" :disabled="busy !== null">
+            {{ busy === 'create' ? 'Создаём…' : 'Создать игру' }}
+          </UiButton>
+        </form>
+
+        <div class="divider"><span>или</span></div>
+
+        <form class="join" @submit.prevent="join">
+          <UiInput
+            v-model="code"
+            label="Код комнаты"
+            variant="code"
+            :normalize="normalizeCode"
+            placeholder="ABC234"
+            autocapitalize="characters"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <UiButton variant="secondary" type="submit" :disabled="busy !== null">
+            {{ busy === 'join' ? 'Входим…' : 'Присоединиться' }}
+          </UiButton>
+        </form>
+
+        <UiError :message="store.error" />
+      </UiCard>
+
+      <p v-if="auth.isGuest" class="muted home__guest">
+        Вы играете гостем: история и статистика не сохраняются.
+        <RouterLink to="/auth?mode=register">Зарегистрироваться</RouterLink>
+      </p>
+    </template>
+
     <ul class="hints">
-      <li>Две вкладки браузера тоже подходят, чтобы попробовать.</li>
+      <li>Для игры вдвоём в одном браузере нужны два аккаунта или окно инкогнито.</li>
       <li>Короткий обрыв связи не прерывает партию — можно вернуться.</li>
     </ul>
   </main>

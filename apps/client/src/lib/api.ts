@@ -1,4 +1,10 @@
-import type { ApiErrorBody, GameSessionResponse } from '@ttt/shared';
+import type {
+  ApiErrorBody,
+  AuthResponse,
+  GameSessionResponse,
+  MatchListResponse,
+  StatsResponse,
+} from '@ttt/shared';
 
 export class ApiError extends Error {
   readonly code: string;
@@ -20,11 +26,11 @@ const REQUEST_TIMEOUT_MS = 10_000;
  * Адрес сокета строится по тем же правилам, что и HTTP-база:
  * явный `VITE_WS_URL` → origin API → текущий origin.
  */
-export function websocketUrl(token: string): string {
+export function websocketUrl(code: string): string {
   const base = WS_BASE_URL || apiOrigin() || window.location.origin;
   const url = new URL('/ws', base);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.searchParams.set('token', token);
+  url.searchParams.set('code', code.toUpperCase());
   return url.toString();
 }
 
@@ -47,6 +53,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
+      credentials: 'include',
       signal: init?.signal ?? controller?.signal,
     });
   } catch {
@@ -82,18 +89,46 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export function createGame(name: string): Promise<GameSessionResponse> {
-  return request<GameSessionResponse>('/api/games', {
+function jsonBody(body: unknown): RequestInit {
+  return {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name }),
-  });
+    body: JSON.stringify(body),
+  };
 }
 
-export function joinGame(code: string, name: string): Promise<GameSessionResponse> {
-  return request<GameSessionResponse>(`/api/games/${encodeURIComponent(code)}/join`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name }),
-  });
+export function register(input: { email: string; password: string; name: string }): Promise<AuthResponse> {
+  return request<AuthResponse>('/api/auth/register', jsonBody(input));
+}
+
+export function login(input: { email: string; password: string }): Promise<AuthResponse> {
+  return request<AuthResponse>('/api/auth/login', jsonBody(input));
+}
+
+export function loginAsGuest(name: string): Promise<AuthResponse> {
+  return request<AuthResponse>('/api/auth/guest', jsonBody({ name }));
+}
+
+export function logout(): Promise<void> {
+  return request<void>('/api/auth/logout', { method: 'POST' });
+}
+
+export function fetchMe(): Promise<AuthResponse> {
+  return request<AuthResponse>('/api/auth/me');
+}
+
+export function createGame(): Promise<GameSessionResponse> {
+  return request<GameSessionResponse>('/api/games', { method: 'POST' });
+}
+
+export function joinGame(code: string): Promise<GameSessionResponse> {
+  return request<GameSessionResponse>(`/api/games/${encodeURIComponent(code)}/join`, { method: 'POST' });
+}
+
+export function fetchStats(): Promise<StatsResponse> {
+  return request<StatsResponse>('/api/me/stats');
+}
+
+export function fetchMatches(limit = 20, offset = 0): Promise<MatchListResponse> {
+  return request<MatchListResponse>(`/api/me/matches?limit=${limit}&offset=${offset}`);
 }

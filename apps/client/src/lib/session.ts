@@ -4,15 +4,13 @@ export interface Session {
   gameId: string;
   code: string;
   playerId: string;
-  token: string;
   mark: Mark;
-  name: string;
 }
 
 const SESSION_PREFIX = 'ttt:session:';
 const NAME_KEY = 'ttt:name';
 
-/** Имя переживает перезапуск браузера, сессия — нет (она привязана к вкладке). */
+/** Имя гостя переживает перезапуск браузера, сессия — нет (она привязана к вкладке). */
 function nameStorage(): Storage | null {
   try {
     return window.localStorage;
@@ -22,9 +20,8 @@ function nameStorage(): Storage | null {
 }
 
 /**
- * Сессии живут в sessionStorage: у каждой вкладки своя сессия.
- * Иначе вторая вкладка при входе в ту же комнату перезаписывала бы
- * токен первой, и после перезагрузки игрок превращался бы в соперника.
+ * Сессии живут в sessionStorage: у каждой вкладки своя игровая сессия.
+ * Идентификация пользователя при этом общая — она в httpOnly cookie.
  */
 function sessionStorageSafe(): Storage | null {
   try {
@@ -58,16 +55,14 @@ export function loadSession(code: string): Session | null {
     const parsed = JSON.parse(raw) as Partial<Session> | null;
     if (!parsed || typeof parsed !== 'object') return null;
     if (!isFilledString(parsed.gameId) || !isFilledString(parsed.playerId)) return null;
-    if (!isFilledString(parsed.token) || !isFilledString(parsed.code)) return null;
+    if (!isFilledString(parsed.code)) return null;
     if (!isMark(parsed.mark)) return null;
 
     return {
       gameId: parsed.gameId,
       code: parsed.code.toUpperCase(),
       playerId: parsed.playerId,
-      token: parsed.token,
       mark: parsed.mark,
-      name: typeof parsed.name === 'string' ? parsed.name : '',
     };
   } catch {
     return null;

@@ -1,16 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { sanitizeName, toPublicGame } from '@ttt/shared';
+import { toPublicGame } from '@ttt/shared';
 import type { GameSessionResponse } from '@ttt/shared';
 import type { RoomRegistry } from './rooms.js';
-
-const nameBodySchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['name'],
-  properties: {
-    name: { type: 'string', minLength: 1, maxLength: 20 },
-  },
-} as const;
 
 const codeParamsSchema = {
   type: 'object',
@@ -23,14 +14,12 @@ const codeParamsSchema = {
 function sessionBody(result: {
   game: { id: string; code: string };
   playerId: string;
-  token: string;
   mark: 'X' | 'O';
 }): GameSessionResponse {
   return {
     gameId: result.game.id,
     code: result.game.code,
     playerId: result.playerId,
-    token: result.token,
     mark: result.mark,
   };
 }
@@ -38,36 +27,27 @@ function sessionBody(result: {
 export function registerRoutes(app: FastifyInstance, registry: RoomRegistry): void {
   app.get('/health', async () => ({ ok: true }));
 
-  app.post<{ Body: { name: string } }>(
+  app.post(
     '/api/games',
     {
-      schema: { body: nameBodySchema },
+      preHandler: app.authenticate,
       config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
-      const name = sanitizeName(request.body.name);
-      if (!name) {
-        return reply.code(400).send({ code: 'BAD_REQUEST', message: 'Введите имя' });
-      }
-
-      const result = registry.create(name);
+      const result = registry.create(request.authUser.id, request.authUser.name);
       return reply.code(201).send(sessionBody(result));
     },
   );
 
-  app.post<{ Params: { code: string }; Body: { name: string } }>(
+  app.post<{ Params: { code: string } }>(
     '/api/games/:code/join',
     {
-      schema: { body: nameBodySchema, params: codeParamsSchema },
+      schema: { params: codeParamsSchema },
+      preHandler: app.authenticate,
       config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
-      const name = sanitizeName(request.body.name);
-      if (!name) {
-        return reply.code(400).send({ code: 'BAD_REQUEST', message: 'Введите имя' });
-      }
-
-      const result = registry.join(request.params.code, name);
+      const result = registry.join(request.params.code, request.authUser.id, request.authUser.name);
       return reply.code(201).send(sessionBody(result));
     },
   );
@@ -76,6 +56,7 @@ export function registerRoutes(app: FastifyInstance, registry: RoomRegistry): vo
     '/api/games/:code',
     {
       schema: { params: codeParamsSchema },
+      preHandler: app.authenticate,
       config: { rateLimit: { max: 120, timeWindow: '1 minute' } },
     },
     async (request, reply) => {

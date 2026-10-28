@@ -18,7 +18,6 @@ import type { Game, Mark, PlayerSlot } from '@ttt/shared';
 export interface CreateResult {
   game: Game;
   playerId: string;
-  token: string;
   mark: Mark;
 }
 
@@ -26,11 +25,6 @@ export interface AttachResult {
   game: Game;
   playerId: string;
   mark: Mark;
-}
-
-export interface AuthContext {
-  gameId: string;
-  playerId: string;
 }
 
 export interface RoomRegistryOptions {
@@ -48,22 +42,19 @@ const MARKS: MarkPair = ['X', 'O'];
  * Хранилище комнат в памяти процесса.
  *
  * Всё состояние партии живёт здесь, поэтому при рестарте сервера партии
- * теряются — для MVP это осознанный компромисс. Интерфейс намеренно
- * повторяет то, что понадобится Redis-адаптеру.
+ * теряются — для MVP это осознанный компромисс. Идентификация игроков
+ * приходит снаружи: `playerId` — это id аккаунта или гостя.
  */
 export class RoomRegistry {
   private readonly games = new Map<string, Game>();
   private readonly codes = new Map<string, string>();
-  private readonly tokens = new Map<string, AuthContext>();
   private readonly abandonTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly listeners = new Set<(game: Game) => void>();
 
   private readonly now: () => number;
   private readonly graceMs: number;
   private readonly ttlMs: number;
   private readonly maxRooms: number;
-
-  /** Подписчик на изменения: WS-слой рассылает снапшоты. */
-  onStateChange: (game: Game) => void = () => {};
 
   constructor(options: RoomRegistryOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -72,80 +63,76 @@ export class RoomRegistry {
     this.maxRooms = options.maxRooms ?? 10_000;
   }
 
+  /** Подписка на изменения: WS-рассылка и запись истории. */
+  subscribe(listener: (game: Game) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
   getByCode(code: string): Game | undefined {
     const gameId = this.codes.get(code.trim().toUpperCase());
     return gameId ? this.games.get(gameId) : undefined;
   }
 
-  auth(token: string): AuthContext {
-    const context = this.tokens.get(token);
-    if (!context) {
-      throw new GameError('INVALID_TOKEN', 'Сессия недействительна');
-    }
-    return context;
-  }
-
-  create(name: string): CreateResult {
+  create(playerId: string, name: string): CreateResult {
     if (this.games.size >= this.maxRooms) {
       throw new GameError('ROOM_LIMIT', 'Сервер перегружен, попробуйте позже');
     }
 
     const now = this.now();
     const code = this.uniqueCode();
-    const host = makeSlot({ playerId: randomUUID(), name, token: randomUUID() });
+    const host = makeSlot({ playerId, name });
     const game = createGame({ id: randomUUID(), code, host, now });
 
     this.games.set(game.id, game);
     this.codes.set(code, game.id);
-    this.tokens.set(host.token, { gameId: game.id, playerId: host.playerId });
 
-    return { game, playerId: host.playerId, token: host.token, mark: 'X' };
+    return { game, playerId: host.playerId, mark: 'X' };
   }
 
-  join(code: string, name: string): CreateResult {
+  join(code: string, playerId: string, name: string): CreateResult {
     const game = this.getByCode(code);
     if (!game) {
       throw new GameError('NOT_FOUND', 'Комната не найдена');
     }
 
-    const guest = makeSlot({ playerId: randomUUID(), name, token: randomUUID() });
+    // Повторный вход того же игрока (перезагрузка, возврат по ссылке)
+    // не должен создавать второго участника.
+    const existing = markOf(game, playerId);
+    if (existing) {
+      return { game, playerId, mark: existing };
+    }
+
+    const guest = makeSlot({ playerId, name });
     const next = joinGame(game, guest, this.now());
 
     this.games.set(next.id, next);
-    this.tokens.set(guest.token, { gameId: next.id, playerId: guest.playerId });
     // Гость мог так и не открыть сокет: не даём партии зависнуть навсегда.
     this.scheduleForDisconnected(next);
     this.emit(next);
 
-    return { game: next, playerId: guest.playerId, token: guest.token, mark: 'O' };
+    return { game: next, playerId: guest.playerId, mark: 'O' };
   }
 
-  move(token: string, index: number, version: number): Game {
-    const context = this.auth(token);
-    const game = this.games.get(context.gameId);
-    if (!game) {
-      throw new GameError('NOT_FOUND', 'Партия не найдена');
-    }
-
-    const next = applyMove(game, { playerId: context.playerId, index, version }, this.now());
+  move(gameId: string, playerId: string, index: number, version: number): Game {
+    const game = this.getGame(gameId);
+    const next = applyMove(game, { playerId, index, version }, this.now());
     this.games.set(next.id, next);
     this.emit(next);
     return next;
   }
 
-  rematch(token: string): Game {
-    const context = this.auth(token);
-    const game = this.games.get(context.gameId);
-    if (!game) {
-      throw new GameError('NOT_FOUND', 'Партия не найдена');
-    }
+  rematch(gameId: string, playerId: string): Game {
+    const game = this.getGame(gameId);
 
     // Повторный голос того же игрока не должен порождать рассылку.
-    if (game.rematchVotes.includes(context.playerId)) {
+    if (game.rematchVotes.includes(playerId)) {
       return game;
     }
 
-    const { game: next, started } = startRematch(game, context.playerId, this.now());
+    const { game: next, started } = startRematch(game, playerId, this.now());
     this.games.set(next.id, next);
     if (started) {
       this.scheduleForDisconnected(next);
@@ -155,23 +142,22 @@ export class RoomRegistry {
   }
 
   /** Игрок открыл сокет (впервые или после обрыва). */
-  attach(token: string): AttachResult {
-    const context = this.auth(token);
-    const game = this.games.get(context.gameId);
+  attach(code: string, playerId: string): AttachResult {
+    const game = this.getByCode(code);
     if (!game) {
       throw new GameError('NOT_FOUND', 'Партия не найдена');
     }
 
-    const mark = markOf(game, context.playerId);
+    const mark = markOf(game, playerId);
     if (!mark) {
       throw new GameError('NOT_IN_GAME', 'Вы не участник этой партии');
     }
 
-    this.clearAbandonTimer(game.id, context.playerId);
+    this.clearAbandonTimer(game.id, playerId);
 
     const wasDisconnected = !slotOf(game, mark).connected;
     if (!wasDisconnected) {
-      return { game, playerId: context.playerId, mark };
+      return { game, playerId, mark };
     }
 
     const next = this.cloneAndStore(game);
@@ -181,18 +167,15 @@ export class RoomRegistry {
     next.updatedAt = this.now();
     this.emit(next);
 
-    return { game: next, playerId: context.playerId, mark };
+    return { game: next, playerId, mark };
   }
 
   /** Сокет закрылся: даём время на переподключение. */
-  detach(token: string): void {
-    const context = this.tokens.get(token);
-    if (!context) return;
-
-    const game = this.games.get(context.gameId);
+  detach(gameId: string, playerId: string): void {
+    const game = this.games.get(gameId);
     if (!game) return;
 
-    const mark = markOf(game, context.playerId);
+    const mark = markOf(game, playerId);
     if (!mark) return;
     if (!slotOf(game, mark).connected) return;
 
@@ -203,18 +186,17 @@ export class RoomRegistry {
     next.updatedAt = this.now();
 
     if (next.status === 'playing' || next.status === 'waiting') {
-      this.scheduleAbandon(next.id, context.playerId);
+      this.scheduleAbandon(next.id, playerId);
     }
     this.emit(next);
   }
 
   /** Явный выход из комнаты. */
-  leave(token: string): Game | null {
-    const context = this.auth(token);
-    const game = this.games.get(context.gameId);
+  leave(gameId: string, playerId: string): Game | null {
+    const game = this.games.get(gameId);
     if (!game) return null;
 
-    const mark = markOf(game, context.playerId);
+    const mark = markOf(game, playerId);
     if (!mark) return null;
 
     if (game.status === 'waiting') {
@@ -223,7 +205,7 @@ export class RoomRegistry {
     }
 
     if (game.status === 'playing') {
-      this.abandon(game.id, context.playerId, true);
+      this.abandon(game.id, playerId, true);
       return this.games.get(game.id) ?? null;
     }
 
@@ -260,12 +242,23 @@ export class RoomRegistry {
       clearTimeout(timer);
     }
     this.abandonTimers.clear();
+    this.listeners.clear();
   }
 
   // ── внутреннее ────────────────────────────────────────────────────────────
 
   private emit(game: Game): void {
-    this.onStateChange(game);
+    for (const listener of this.listeners) {
+      listener(game);
+    }
+  }
+
+  private getGame(gameId: string): Game {
+    const game = this.games.get(gameId);
+    if (!game) {
+      throw new GameError('NOT_FOUND', 'Партия не найдена');
+    }
+    return game;
   }
 
   private cloneAndStore(game: Game): Game {
@@ -316,7 +309,14 @@ export class RoomRegistry {
     const mark = markOf(game, playerId);
     if (!mark) return;
     if (!force && slotOf(game, mark).connected) return;
-    if (game.status !== 'playing' && game.status !== 'waiting') return;
+
+    // Комната ожидания без второго игрока никому не нужна: после grace-периода
+    // удаляем её, а не оставляем «брошенной» до общего TTL.
+    if (game.status === 'waiting') {
+      this.deleteGame(gameId);
+      return;
+    }
+    if (game.status !== 'playing') return;
 
     const other = opponentOf(mark);
     const opponentSlot = game.players[other];
@@ -355,7 +355,6 @@ export class RoomRegistry {
     for (const mark of MARKS) {
       const slot = game.players[mark];
       if (!slot) continue;
-      this.tokens.delete(slot.token);
       this.clearAbandonTimer(gameId, slot.playerId);
     }
     this.games.delete(gameId);

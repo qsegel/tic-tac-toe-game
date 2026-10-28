@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NAME_MAX_LENGTH, type Cell } from '@ttt/shared';
+import { type Cell } from '@ttt/shared';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ConnectionBanner from '@/components/ConnectionBanner.vue';
@@ -8,19 +8,19 @@ import PlayerCard from '@/components/PlayerCard.vue';
 import UiButton from '@/components/ui/UiButton.vue';
 import UiCard from '@/components/ui/UiCard.vue';
 import UiError from '@/components/ui/UiError.vue';
-import UiInput from '@/components/ui/UiInput.vue';
-import { loadName, saveName } from '@/lib/session';
+import { ApiError } from '@/lib/api';
 import { statusText, statusTone } from '@/lib/status';
+import { useAuthStore } from '@/stores/auth';
 import { useGameStore } from '@/stores/game';
 
 const EMPTY_BOARD: Cell[] = Array<Cell>(9).fill(null);
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 const store = useGameStore();
 
 const code = computed(() => String(route.params.code ?? '').toUpperCase());
-const name = ref(loadName());
 const busy = ref(false);
 const copied = ref(false);
 let copiedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -32,6 +32,7 @@ const tone = computed(() => statusTone(game.value, store.you));
 const inviteLink = computed(() => `${window.location.origin}/game/${code.value}`);
 const showRematch = computed(() => game.value?.status === 'finished');
 const canVoteRematch = computed(() => store.connection === 'open' && !store.myRematchVote);
+const round = computed(() => game.value?.round ?? 1);
 const rematchLabel = computed(() => {
   if (store.connection !== 'open') return 'Нет соединения…';
   if (store.myRematchVote) return 'Ждём соперника…';
@@ -49,18 +50,13 @@ onUnmounted(() => {
 });
 
 async function join(): Promise<void> {
-  const clean = name.value.trim();
-  if (!clean) {
-    store.setError('Введите имя');
-    return;
-  }
-  saveName(clean);
-
   busy.value = true;
   try {
-    await store.join(code.value, clean);
-  } catch {
-    // текст ошибки уже в store.error
+    await store.join(code.value);
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 401) {
+      await router.push({ name: 'auth', query: { redirect: route.fullPath } });
+    }
   } finally {
     busy.value = false;
   }
@@ -92,7 +88,10 @@ function leave(): void {
   <main class="page page--game">
     <header class="gamebar">
       <UiButton variant="ghost" @click="leave">← Выйти</UiButton>
-      <span class="gamebar__code">Комната <b>{{ code }}</b></span>
+      <span class="gamebar__code">
+        Комната <b>{{ code }}</b>
+        <template v-if="round > 1"> · раунд {{ round }}</template>
+      </span>
       <UiButton variant="ghost" @click="copyInvite">
         {{ copied ? 'Скопировано ✓' : 'Ссылка' }}
       </UiButton>
@@ -104,16 +103,11 @@ function leave(): void {
       <h1 class="join-card__title">Присоединиться к игре</h1>
       <p class="muted">
         Комната <b>{{ code }}</b
-        >. Введите имя, чтобы занять свободное место.
+        >. Вы войдёте как <b>{{ auth.user?.name ?? 'игрок' }}</b
+        >.
       </p>
       <form class="join-card__form" @submit.prevent="join">
-        <UiInput
-          v-model="name"
-          :maxlength="NAME_MAX_LENGTH"
-          placeholder="Ваше имя"
-          autocomplete="nickname"
-        />
-        <UiButton type="submit" :disabled="busy">{{ busy ? 'Входим…' : 'Войти' }}</UiButton>
+        <UiButton type="submit" :disabled="busy">{{ busy ? 'Входим…' : 'Войти в комнату' }}</UiButton>
       </form>
       <UiError :message="store.error" />
     </UiCard>
@@ -121,7 +115,7 @@ function leave(): void {
     <UiCard v-else class="game-card">
       <div class="players">
         <PlayerCard
-          :name="store.me?.name ?? 'Вы'"
+          :name="store.me?.name ?? auth.user?.name ?? 'Вы'"
           :mark="store.you"
           :connected="store.me?.connected ?? false"
           :active="store.isMyTurn"

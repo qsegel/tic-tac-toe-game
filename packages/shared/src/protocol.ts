@@ -1,4 +1,4 @@
-import type { ErrorCode, Mark, PublicGame } from './types.js';
+import type { ErrorCode, Mark, PublicGame, Winner } from './types.js';
 
 /** Сообщения от клиента к серверу. */
 export type ClientMessage =
@@ -19,11 +19,52 @@ export interface ApiErrorBody {
   message: string;
 }
 
-/** Ответ на создание/вход в игру. */
+/** Ответ на создание/вход в игру. Секретов больше нет: идентификация — cookie. */
 export interface GameSessionResponse {
   gameId: string;
   code: string;
   playerId: string;
-  token: string;
   mark: Mark;
+}
+
+/** Текущий пользователь. У гостя `email === null`, `guest === true`. */
+export interface AuthUser {
+  id: string;
+  email: string | null;
+  name: string;
+  guest: boolean;
+  createdAt: number;
+}
+
+export interface AuthResponse {
+  user: AuthUser;
+}
+
+export interface StatsResponse {
+  wins: number;
+  losses: number;
+  draws: number;
+  abandoned: number;
+  played: number;
+}
+
+export type MatchResult = 'win' | 'loss' | 'draw' | 'abandoned';
+
+/** Одна завершённая партия (раунд) в истории игрока. */
+export interface MatchSummary {
+  id: number;
+  code: string;
+  round: number;
+  status: 'finished' | 'abandoned';
+  winner: Winner | null;
+  myMark: Mark;
+  result: MatchResult;
+  opponentName: string | null;
+  finishedAt: number;
+}
+
+export interface MatchListResponse {
+  matches: MatchSummary[];
+  total: number;
+  hasMore: boolean;
 }

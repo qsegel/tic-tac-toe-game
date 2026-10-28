@@ -59,6 +59,7 @@ function makeGame(overrides: Partial<PublicGame> = {}): PublicGame {
     winner: null,
     winningLine: null,
     version: 1,
+    round: 1,
     rematchVotes: [],
     createdAt: 0,
     ...overrides,
@@ -69,9 +70,7 @@ const session = {
   gameId: 'game-1',
   code: 'ABC234',
   playerId: 'player-1',
-  token: 'token-1',
   mark: 'X' as const,
-  name: 'Аня',
 };
 
 const SESSION_KEY = 'ttt:session:ABC234';
@@ -102,13 +101,13 @@ afterEach(() => {
 describe('game store', () => {
   it('создаёт игру, сохраняет сессию и открывает сокет', async () => {
     const store = useGameStore();
-    const code = await store.create('Аня');
+    const code = await store.create();
 
     expect(code).toBe('ABC234');
-    expect(store.session?.token).toBe('token-1');
-    expect(sessionStorage.getItem(SESSION_KEY)).toContain('token-1');
+    expect(store.session?.playerId).toBe('player-1');
+    expect(sessionStorage.getItem(SESSION_KEY)).toContain('player-1');
     expect(FakeSocket.instances).toHaveLength(1);
-    expect(FakeSocket.instances[0]!.url).toContain('/ws?token=token-1');
+    expect(FakeSocket.instances[0]!.url).toContain('/ws?code=ABC234');
 
     FakeSocket.instances[0]!.open();
     expect(store.connection).toBe('open');
@@ -116,7 +115,7 @@ describe('game store', () => {
 
   it('применяет снапшот состояния и отправляет ход с версией', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
 
@@ -133,7 +132,7 @@ describe('game store', () => {
 
   it('игнорирует второй клик до прихода нового состояния', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
     socket.receive({ type: 'state', game: makeGame(), you: 'X' });
@@ -152,7 +151,7 @@ describe('game store', () => {
 
   it('не отправляет ход, когда сейчас очередь соперника', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
     socket.receive({ type: 'state', game: makeGame({ turn: 'O' }), you: 'X' });
@@ -164,7 +163,7 @@ describe('game store', () => {
 
   it('обновляет метку в сессии после рематча', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
     socket.receive({ type: 'state', game: makeGame(), you: 'X' });
@@ -179,7 +178,7 @@ describe('game store', () => {
 
   it('понимает, кто именно проголосовал за рематч', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
 
@@ -207,7 +206,7 @@ describe('game store', () => {
 
   it('не отправляет голос за рематч без соединения', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
     socket.receive({
@@ -228,7 +227,7 @@ describe('game store', () => {
 
   it('показывает ошибку сервера', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
 
@@ -239,7 +238,7 @@ describe('game store', () => {
   it('переподключается после обрыва связи', async () => {
     vi.useFakeTimers();
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
 
     const first = FakeSocket.instances[0]!;
     first.open();
@@ -251,17 +250,17 @@ describe('game store', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(FakeSocket.instances).toHaveLength(2);
-    expect(FakeSocket.instances[1]!.url).toContain('/ws?token=token-1');
+    expect(FakeSocket.instances[1]!.url).toContain('/ws?code=ABC234');
   });
 
-  it('сбрасывает протухшую сессию, если сервер отверг токен', async () => {
+  it('сбрасывает протухшую сессию и auth-состояние, если cookie истекла', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
     socket.receive({ type: 'state', game: makeGame(), you: 'X' });
 
-    socket.closeWith(1008, 'INVALID_TOKEN');
+    socket.closeWith(1008, 'unauthorized');
 
     expect(store.session).toBeNull();
     expect(store.game).toBeNull();
@@ -274,7 +273,7 @@ describe('game store', () => {
   it('не переподключается, если игру открыли в другой вкладке', async () => {
     vi.useFakeTimers();
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
 
@@ -291,7 +290,7 @@ describe('game store', () => {
   it('переподключается при превышении лимита соединений', async () => {
     vi.useFakeTimers();
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
 
@@ -306,7 +305,7 @@ describe('game store', () => {
 
   it('очищает состояние при выходе из комнаты', async () => {
     const store = useGameStore();
-    await store.create('Аня');
+    await store.create();
     const socket = FakeSocket.instances[0]!;
     socket.open();
     socket.receive({ type: 'state', game: makeGame(), you: 'X' });

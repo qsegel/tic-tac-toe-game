@@ -44,7 +44,18 @@ export {
   toPublicGame,
 } from './game.js';
 
-export type { ApiErrorBody, ClientMessage, GameSessionResponse, ServerMessage } from './protocol.js';
+export type {
+  ApiErrorBody,
+  AuthResponse,
+  AuthUser,
+  ClientMessage,
+  GameSessionResponse,
+  MatchListResponse,
+  MatchResult,
+  MatchSummary,
+  ServerMessage,
+  StatsResponse,
+} from './protocol.js';
 
 /** Строгая проверка входящих сообщений: форма зависит от типа. */
 export function isClientMessage(value: unknown): value is ClientMessage {

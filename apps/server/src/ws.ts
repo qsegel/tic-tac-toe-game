@@ -10,6 +10,8 @@ import {
 } from '@ttt/shared';
 import type { ClientMessage, ErrorCode, ServerMessage } from '@ttt/shared';
 import type { WebSocket } from 'ws';
+import type { AuthService } from './auth/session.js';
+import { SESSION_COOKIE, readCookie } from './auth/session.js';
 import type { AttachResult, RoomRegistry } from './rooms.js';
 
 export interface WsOptions {
@@ -26,23 +28,28 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_BUFFERED_BYTES = 1_048_576;
 const DEFAULT_MAX_SOCKETS_PER_IP = 8;
 
-export function registerWs(app: FastifyInstance, registry: RoomRegistry, options: WsOptions = {}): void {
+export function registerWs(
+  app: FastifyInstance,
+  registry: RoomRegistry,
+  auth: AuthService,
+  options: WsOptions = {},
+): void {
   const sockets = new Map<string, WebSocket>();
   const socketsByIp = new Map<string, number>();
   const alive = new WeakMap<WebSocket, boolean>();
   const origins = (options.origins ?? []).map(normalizeOrigin).filter(Boolean);
   const maxSocketsPerIp = options.maxSocketsPerIp ?? DEFAULT_MAX_SOCKETS_PER_IP;
 
-  registry.onStateChange = (game) => {
+  registry.subscribe((game) => {
     const snapshot = toPublicGame(game);
     for (const mark of ['X', 'O'] as const) {
       const slot = game.players[mark];
       if (!slot) continue;
-      const socket = sockets.get(slot.playerId);
+      const socket = sockets.get(socketKey(game.id, slot.playerId));
       if (!socket) continue;
       send(socket, { type: 'state', game: snapshot, you: mark });
     }
-  };
+  });
 
   // Сервер сам проверяет живость соединения: без этого «мертвые» сокеты
   // держат игрока подключённым и блокируют abandon.
@@ -77,9 +84,23 @@ export function registerWs(app: FastifyInstance, registry: RoomRegistry, options
       return;
     }
 
-    const token = readToken(request.url);
+    const token = readCookie(request.headers.cookie, SESSION_COOKIE);
     if (!token) {
-      socket.close(CLOSE_POLICY_VIOLATION, 'token-required');
+      socket.close(CLOSE_POLICY_VIOLATION, 'unauthorized');
+      return;
+    }
+
+    let user;
+    try {
+      user = auth.authenticateToken(token);
+    } catch {
+      socket.close(CLOSE_POLICY_VIOLATION, 'unauthorized');
+      return;
+    }
+
+    const code = readCode(request.url);
+    if (!code) {
+      socket.close(CLOSE_POLICY_VIOLATION, 'code-required');
       return;
     }
 
@@ -99,23 +120,27 @@ export function registerWs(app: FastifyInstance, registry: RoomRegistry, options
 
     let attached: AttachResult;
     try {
-      attached = registry.attach(token);
+      attached = registry.attach(code, user.id);
     } catch (error) {
       releaseIpSlot();
-      const reason = error instanceof GameError ? error.code : 'invalid-token';
+      const reason = error instanceof GameError ? error.code : 'unauthorized';
       socket.close(CLOSE_POLICY_VIOLATION, reason);
       return;
     }
 
+    const gameId = attached.game.id;
+    const playerId = attached.playerId;
+    const key = socketKey(gameId, playerId);
+
     alive.set(socket, true);
     socket.on('pong', () => alive.set(socket, true));
 
-    const previous = sockets.get(attached.playerId);
+    const previous = sockets.get(key);
     if (previous && previous !== socket) {
-      sockets.delete(attached.playerId);
+      sockets.delete(key);
       previous.close(CLOSE_REPLACED, 'replaced-by-new-session');
     }
-    sockets.set(attached.playerId, socket);
+    sockets.set(key, socket);
 
     send(socket, { type: 'state', game: toPublicGame(attached.game), you: attached.mark });
 
@@ -152,22 +177,21 @@ export function registerWs(app: FastifyInstance, registry: RoomRegistry, options
             }
             moveTimestamps.push(now);
 
-            const context = registry.auth(token);
-            if (context.gameId !== payload.gameId) {
+            if (gameId !== payload.gameId) {
               sendError(socket, 'NOT_FOUND', 'Партия не найдена');
               return;
             }
 
-            registry.move(token, payload.index, payload.version);
+            registry.move(gameId, playerId, payload.index, payload.version);
             break;
           }
 
           case 'rematch':
-            registry.rematch(token);
+            registry.rematch(gameId, playerId);
             break;
 
           case 'leave':
-            registry.leave(token);
+            registry.leave(gameId, playerId);
             socket.close(1000, 'left');
             break;
 
@@ -186,15 +210,19 @@ export function registerWs(app: FastifyInstance, registry: RoomRegistry, options
 
     socket.on('close', () => {
       releaseIpSlot();
-      if (sockets.get(attached.playerId) !== socket) return;
-      sockets.delete(attached.playerId);
-      registry.detach(token);
+      if (sockets.get(key) !== socket) return;
+      sockets.delete(key);
+      registry.detach(gameId, playerId);
     });
 
     socket.on('error', (error: Error) => {
       app.log.warn({ err: error }, 'ws error');
     });
   });
+}
+
+function socketKey(gameId: string, playerId: string): string {
+  return `${gameId}:${playerId}`;
 }
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -227,10 +255,10 @@ function parseMessage(raw: unknown): ClientMessage | null {
   return isClientMessage(data) ? data : null;
 }
 
-function readToken(url: string | undefined): string | null {
+function readCode(url: string | undefined): string | null {
   if (!url) return null;
   try {
-    return new URL(url, 'http://localhost').searchParams.get('token');
+    return new URL(url, 'http://localhost').searchParams.get('code');
   } catch {
     return null;
   }

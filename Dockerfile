@@ -29,7 +29,7 @@ COPY --from=build /app/packages/shared packages/shared
 COPY --from=build /app/apps/server apps/server
 COPY --from=build /app/apps/client/dist apps/client/dist
 
-RUN chown -R node:node /app
+RUN mkdir -p /app/apps/server/data && chown -R node:node /app
 
 EXPOSE 3000
 

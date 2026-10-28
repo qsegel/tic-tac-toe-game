@@ -3,6 +3,7 @@ import { computed, ref, shallowRef } from 'vue';
 import type { ClientMessage, Mark, PublicGame, ServerMessage } from '@ttt/shared';
 import { ApiError, createGame, joinGame, websocketUrl } from '@/lib/api';
 import { clearSession, loadSession, saveSession, type Session } from '@/lib/session';
+import { useAuthStore } from '@/stores/auth';
 
 export type ConnectionState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
@@ -15,6 +16,8 @@ const CLOSE_POLICY_VIOLATION = 1008;
 const STALE_SESSION_REASONS = new Set([
   'invalid-token',
   'token-required',
+  'unauthorized',
+  'code-required',
   'INVALID_TOKEN',
   'NOT_FOUND',
   'NOT_IN_GAME',
@@ -166,7 +169,7 @@ export const useGameStore = defineStore('game', () => {
     detachSocket();
     connection.value = retry > 0 ? 'reconnecting' : 'connecting';
 
-    const ws = new WebSocket(websocketUrl(active.token));
+    const ws = new WebSocket(websocketUrl(active.code));
     socket.value = ws;
 
     ws.onopen = () => {
@@ -197,6 +200,12 @@ export const useGameStore = defineStore('game', () => {
     if (code === CLOSE_REPLACED || reason === 'replaced-by-new-session') {
       connection.value = 'closed';
       setError('Игра уже открыта в другой вкладке', true);
+      return;
+    }
+
+    if (reason === 'unauthorized') {
+      useAuthStore().clear();
+      forgetSession('Сессия истекла — войдите снова');
       return;
     }
 
@@ -298,11 +307,11 @@ export const useGameStore = defineStore('game', () => {
     connect(true);
   }
 
-  async function create(name: string): Promise<string> {
+  async function create(): Promise<string> {
     setError(null);
     try {
-      const response = await createGame(name);
-      const next: Session = { ...response, name };
+      const response = await createGame();
+      const next: Session = { ...response };
       saveSession(next);
       session.value = next;
       clearGameState();
@@ -315,11 +324,11 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  async function join(code: string, name: string): Promise<void> {
+  async function join(code: string): Promise<void> {
     setError(null);
     try {
-      const response = await joinGame(code, name);
-      const next: Session = { ...response, name };
+      const response = await joinGame(code);
+      const next: Session = { ...response };
       saveSession(next);
       session.value = next;
       clearGameState();

@@ -16,6 +16,7 @@ function makeGame(overrides: Partial<PublicGame> = {}): PublicGame {
     winner: null,
     winningLine: null,
     version: 1,
+    round: 1,
     rematchVotes: [],
     createdAt: 0,
     ...overrides,

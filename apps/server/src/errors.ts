@@ -5,6 +5,13 @@ import type { ErrorCode, GameError } from '@ttt/shared';
 export const statusByCode: Partial<Record<ErrorCode, number>> = {
   BAD_REQUEST: 400,
   INVALID_TOKEN: 401,
+  UNAUTHORIZED: 401,
+  INVALID_CREDENTIALS: 401,
+  FORBIDDEN: 403,
+  ACCOUNT_REQUIRED: 403,
+  EMAIL_TAKEN: 409,
+  WEAK_PASSWORD: 400,
+  INVALID_EMAIL: 400,
   NOT_FOUND: 404,
   ROOM_FULL: 409,
   ROOM_LIMIT: 503,

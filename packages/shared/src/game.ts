@@ -2,11 +2,10 @@ import { BOARD_SIZE, NAME_MAX_LENGTH, WIN_LINES } from './constants.js';
 import { GameError } from './types.js';
 import type { Cell, Game, Mark, PlayerSlot, PublicGame } from './types.js';
 
-export function makeSlot(input: { playerId: string; name: string; token: string }): PlayerSlot {
+export function makeSlot(input: { playerId: string; name: string }): PlayerSlot {
   return {
     playerId: input.playerId,
     name: input.name,
-    token: input.token,
     connected: false,
     disconnectedAt: null,
   };
@@ -23,6 +22,7 @@ export function createGame(input: { id: string; code: string; host: PlayerSlot; 
     winner: null,
     winningLine: null,
     version: 0,
+    round: 1,
     rematchVotes: [],
     createdAt: input.now,
     updatedAt: input.now,
@@ -175,6 +175,7 @@ export function startRematch(game: Game, playerId: string, now: number): { game:
   next.winner = null;
   next.winningLine = null;
   next.rematchVotes = [];
+  next.round += 1;
   next.version += 1;
 
   return { game: next, started: true };
@@ -206,6 +207,7 @@ export function toPublicGame(game: Game): PublicGame {
     winner: game.winner,
     winningLine: game.winningLine ? [...game.winningLine] : null,
     version: game.version,
+    round: game.round,
     rematchVotes: game.rematchVotes.flatMap((playerId) => {
       const mark = markOf(game, playerId);
       return mark ? [mark] : [];

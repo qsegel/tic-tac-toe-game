@@ -7,4 +7,13 @@ services:
       PORT: '3000'
       # Клиент и API на одном origin. Добавьте свой домен в прод.
       CLIENT_ORIGIN: 'http://localhost:3000,http://127.0.0.1:3000'
+      # Замените на свой секрет: openssl rand -hex 32
+      JWT_SECRET: 'change-me-in-production-32-characters-minimum'
+      COOKIE_SECURE: 'false'
+      DATABASE_PATH: '/app/apps/server/data/ttt.db'
+    volumes:
+      - ttt-data:/app/apps/server/data
     restart: unless-stopped
+
+volumes:
+  ttt-data:
