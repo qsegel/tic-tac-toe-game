@@ -29,6 +29,8 @@ export interface BuildOptions {
   ttlMs?: number;
   maxRooms?: number;
   maxSocketsPerIp?: number;
+  /** Пауза перед ходом бота; в тестах можно выставить 0. */
+  botDelayMs?: number;
   /** Доверять `X-Forwarded-*` (нужно за reverse-proxy для rate limit и логов). */
   trustProxy?: boolean;
   /** Каталог со собранным клиентом. `null` — не отдавать статику. */
@@ -76,6 +78,7 @@ export async function buildApp(options: BuildOptions = {}): Promise<FastifyInsta
     ...(options.graceMs === undefined ? {} : { graceMs: options.graceMs }),
     ...(options.ttlMs === undefined ? {} : { ttlMs: options.ttlMs }),
     ...(options.maxRooms === undefined ? {} : { maxRooms: options.maxRooms }),
+    ...(options.botDelayMs === undefined ? {} : { botDelayMs: options.botDelayMs }),
   });
 
   await app.register(cookie);

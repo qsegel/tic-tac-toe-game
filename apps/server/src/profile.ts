@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { GameError } from '@ttt/shared';
-import type { MatchListResponse, StatsResponse } from '@ttt/shared';
+import type { LeaderboardResponse, MatchListResponse, StatsResponse } from '@ttt/shared';
 import type { MatchHistory } from './history.js';
 
 const matchesQuerySchema = {
@@ -8,6 +8,15 @@ const matchesQuerySchema = {
   additionalProperties: false,
   properties: {
     limit: { type: 'integer', minimum: 1, maximum: 50 },
+    offset: { type: 'integer', minimum: 0 },
+  },
+} as const;
+
+const leaderboardQuerySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    limit: { type: 'integer', minimum: 1, maximum: 100 },
     offset: { type: 'integer', minimum: 0 },
   },
 } as const;
@@ -37,6 +46,22 @@ export function registerProfileRoutes(app: FastifyInstance, history: MatchHistor
       const limit = request.query.limit ?? 20;
       const offset = request.query.offset ?? 0;
       return history.list(request.authUser.id, limit, offset) satisfies MatchListResponse;
+    },
+  );
+
+  // Лидерборд доступен и гостям: это публичный рейтинг, без email и id.
+  app.get<{ Querystring: { limit?: number; offset?: number } }>(
+    '/api/leaderboard',
+    {
+      schema: { querystring: leaderboardQuerySchema },
+      preHandler: app.authenticate,
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
+    },
+    async (request) => {
+      const limit = request.query.limit ?? 20;
+      const offset = request.query.offset ?? 0;
+      const meId = request.authUser.guest ? null : request.authUser.id;
+      return history.leaderboard(limit, offset, meId) satisfies LeaderboardResponse;
     },
   );
 }

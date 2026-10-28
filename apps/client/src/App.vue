@@ -38,6 +38,7 @@ async function logout(): Promise<void> {
         <template v-if="auth.user">
           <RouterLink v-if="!auth.isGuest" to="/profile" class="app__user-name">{{ userLabel }}</RouterLink>
           <span v-else class="app__user-name app__user-name--guest">{{ userLabel }}</span>
+          <RouterLink to="/leaderboard" class="app__nav-link">Рейтинг</RouterLink>
           <UiButton variant="ghost" @click="logout">Выйти</UiButton>
         </template>
         <RouterLink v-else to="/auth" class="app__login">Войти</RouterLink>

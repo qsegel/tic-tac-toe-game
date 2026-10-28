@@ -6,6 +6,8 @@ import {
   RECONNECT_GRACE_MS,
   ROOM_TTL_MS,
   applyMove,
+  chooseBotMove,
+  createBotGame,
   createGame,
   joinGame,
   makeSlot,
@@ -13,7 +15,7 @@ import {
   opponentOf,
   startRematch,
 } from '@ttt/shared';
-import type { Game, Mark, PlayerSlot } from '@ttt/shared';
+import type { BotDifficulty, Game, Mark, PlayerSlot } from '@ttt/shared';
 
 export interface CreateResult {
   game: Game;
@@ -32,11 +34,17 @@ export interface RoomRegistryOptions {
   graceMs?: number;
   ttlMs?: number;
   maxRooms?: number;
+  /** Пауза перед ходом бота: нужна для UX и для тестов. */
+  botDelayMs?: number;
+  /** Источник случайности для бота (подменяется в тестах). */
+  botRandom?: () => number;
 }
 
 type MarkPair = readonly [Mark, Mark];
 
 const MARKS: MarkPair = ['X', 'O'];
+const BOT_NAME = 'Бот';
+const DEFAULT_BOT_DELAY_MS = 550;
 
 /**
  * Хранилище комнат в памяти процесса.
@@ -49,18 +57,23 @@ export class RoomRegistry {
   private readonly games = new Map<string, Game>();
   private readonly codes = new Map<string, string>();
   private readonly abandonTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly listeners = new Set<(game: Game) => void>();
 
   private readonly now: () => number;
   private readonly graceMs: number;
   private readonly ttlMs: number;
   private readonly maxRooms: number;
+  private readonly botDelayMs: number;
+  private readonly botRandom: () => number;
 
   constructor(options: RoomRegistryOptions = {}) {
     this.now = options.now ?? Date.now;
     this.graceMs = options.graceMs ?? RECONNECT_GRACE_MS;
     this.ttlMs = options.ttlMs ?? ROOM_TTL_MS;
     this.maxRooms = options.maxRooms ?? 10_000;
+    this.botDelayMs = options.botDelayMs ?? DEFAULT_BOT_DELAY_MS;
+    this.botRandom = options.botRandom ?? Math.random;
   }
 
   /** Подписка на изменения: WS-рассылка и запись истории. */
@@ -88,6 +101,33 @@ export class RoomRegistry {
 
     this.games.set(game.id, game);
     this.codes.set(code, game.id);
+
+    return { game, playerId: host.playerId, mark: 'X' };
+  }
+
+  /** Тренировочная партия: бот занимает второй слот сразу. */
+  createBot(playerId: string, name: string, difficulty: BotDifficulty): CreateResult {
+    if (this.games.size >= this.maxRooms) {
+      throw new GameError('ROOM_LIMIT', 'Сервер перегружен, попробуйте позже');
+    }
+
+    const now = this.now();
+    const code = this.uniqueCode();
+    const host = makeSlot({ playerId, name });
+    const game = createBotGame({
+      id: randomUUID(),
+      code,
+      host,
+      botId: `bot_${randomUUID()}`,
+      botName: BOT_NAME,
+      difficulty,
+      now,
+    });
+
+    this.games.set(game.id, game);
+    this.codes.set(code, game.id);
+    // Человек ещё не открыл сокет: если он передумал, комната не должна висеть.
+    this.scheduleForDisconnected(game);
 
     return { game, playerId: host.playerId, mark: 'X' };
   }
@@ -121,6 +161,7 @@ export class RoomRegistry {
     const next = applyMove(game, { playerId, index, version }, this.now());
     this.games.set(next.id, next);
     this.emit(next);
+    this.maybeScheduleBot(next);
     return next;
   }
 
@@ -132,12 +173,26 @@ export class RoomRegistry {
       return game;
     }
 
-    const { game: next, started } = startRematch(game, playerId, this.now());
+    let result = startRematch(game, playerId, this.now());
+
+    // Бот соглашается сразу после человека: не заставляем ждать ответа.
+    if (
+      result.game.mode === 'bot' &&
+      result.game.botPlayerId &&
+      !result.game.rematchVotes.includes(result.game.botPlayerId)
+    ) {
+      result = startRematch(result.game, result.game.botPlayerId, this.now());
+    }
+
+    const next = result.game;
     this.games.set(next.id, next);
-    if (started) {
+    if (result.started) {
       this.scheduleForDisconnected(next);
     }
     this.emit(next);
+    if (result.started) {
+      this.maybeScheduleBot(next);
+    }
     return next;
   }
 
@@ -166,6 +221,7 @@ export class RoomRegistry {
     nextSlot.disconnectedAt = null;
     next.updatedAt = this.now();
     this.emit(next);
+    this.maybeScheduleBot(next);
 
     return { game: next, playerId, mark };
   }
@@ -199,6 +255,12 @@ export class RoomRegistry {
     const mark = markOf(game, playerId);
     if (!mark) return null;
 
+    // С ботом прощаться не нужно: комната сразу становится ненужной.
+    if (game.mode === 'bot') {
+      this.deleteGame(game.id);
+      return null;
+    }
+
     if (game.status === 'waiting') {
       this.deleteGame(game.id);
       return null;
@@ -225,7 +287,8 @@ export class RoomRegistry {
 
     for (const [gameId, game] of this.games) {
       const idle = now - game.updatedAt;
-      const hasPlayers = game.players.X.connected || game.players.O?.connected === true;
+      // Бот «подключён» всегда, но живой комнату делает только человек.
+      const hasPlayers = hasHumanConnected(game);
 
       // Комнату с живыми игроками не трогаем: иначе рематч вернёт NOT_FOUND.
       if (idle > this.ttlMs && !hasPlayers) {
@@ -242,6 +305,10 @@ export class RoomRegistry {
       clearTimeout(timer);
     }
     this.abandonTimers.clear();
+    for (const timer of this.botTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.botTimers.clear();
     this.listeners.clear();
   }
 
@@ -334,6 +401,67 @@ export class RoomRegistry {
       this.clearAbandonTimer(gameId, opponentSlot.playerId);
     }
     this.emit(next);
+
+    // С ботом некого ждать: после grace-периода комнату можно удалить.
+    if (next.mode === 'bot') {
+      this.deleteGame(gameId);
+    }
+  }
+
+  /**
+   * Планирует ход бота, если сейчас его очередь. Таймер перечитывает
+   * состояние: за время «раздумий» партию могли бросить или перезапустить.
+   */
+  private maybeScheduleBot(game: Game): void {
+    this.clearBotTimer(game.id);
+    if (game.mode !== 'bot' || !game.botPlayerId) return;
+    if (game.status !== 'playing') return;
+
+    const botMark = markOf(game, game.botPlayerId);
+    if (!botMark || game.turn !== botMark) return;
+
+    const version = game.version;
+    const timer = setTimeout(() => {
+      this.botTimers.delete(game.id);
+      const current = this.games.get(game.id);
+      if (!current || current.status !== 'playing' || current.version !== version) return;
+      if (!current.botPlayerId) return;
+
+      const mark = markOf(current, current.botPlayerId);
+      if (!mark || current.turn !== mark) return;
+
+      const index = chooseBotMove(
+        current.board,
+        mark,
+        current.botDifficulty ?? 'medium',
+        this.botRandom,
+      );
+      if (index === null) return;
+
+      try {
+        const moved = applyMove(
+          current,
+          { playerId: current.botPlayerId, index, version: current.version },
+          this.now(),
+        );
+        this.games.set(moved.id, moved);
+        this.emit(moved);
+        this.maybeScheduleBot(moved);
+      } catch {
+        // Состояние изменилось, пока бот «думал»: следующий ход запланирует
+        // тот, кто это изменение сделал.
+      }
+    }, this.botDelayMs);
+    timer.unref?.();
+    this.botTimers.set(game.id, timer);
+  }
+
+  private clearBotTimer(gameId: string): void {
+    const timer = this.botTimers.get(gameId);
+    if (timer) {
+      clearTimeout(timer);
+      this.botTimers.delete(gameId);
+    }
   }
 
   private uniqueCode(): string {
@@ -352,6 +480,7 @@ export class RoomRegistry {
     if (!game) return;
 
     this.codes.delete(game.code);
+    this.clearBotTimer(gameId);
     for (const mark of MARKS) {
       const slot = game.players[mark];
       if (!slot) continue;
@@ -363,6 +492,14 @@ export class RoomRegistry {
 
 function timerKey(gameId: string, playerId: string): string {
   return `${gameId}:${playerId}`;
+}
+
+function hasHumanConnected(game: Game): boolean {
+  return MARKS.some((mark) => {
+    const slot = game.players[mark];
+    if (!slot || !slot.connected) return false;
+    return slot.playerId !== game.botPlayerId;
+  });
 }
 
 function slotOf(game: Game, mark: Mark): PlayerSlot {

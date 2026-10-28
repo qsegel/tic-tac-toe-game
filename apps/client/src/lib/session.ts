@@ -1,10 +1,11 @@
-import type { Mark } from '@ttt/shared';
+import type { GameMode, Mark } from '@ttt/shared';
 
 export interface Session {
   gameId: string;
   code: string;
   playerId: string;
   mark: Mark;
+  mode: GameMode;
 }
 
 const SESSION_PREFIX = 'ttt:session:';
@@ -63,6 +64,8 @@ export function loadSession(code: string): Session | null {
       code: parsed.code.toUpperCase(),
       playerId: parsed.playerId,
       mark: parsed.mark,
+      // Старые сессии в sessionStorage не знают о режиме — считаем их обычными.
+      mode: parsed.mode === 'bot' ? 'bot' : 'pvp',
     };
   } catch {
     return null;

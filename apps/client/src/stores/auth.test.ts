@@ -7,6 +7,7 @@ const user = {
   email: 'anya@example.com',
   name: 'Аня',
   guest: false,
+  rating: 1000,
   createdAt: 0,
 };
 

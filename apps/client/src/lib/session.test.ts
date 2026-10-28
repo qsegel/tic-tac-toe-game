@@ -6,6 +6,7 @@ const session: Session = {
   code: 'ABC234',
   playerId: 'player-1',
   mark: 'X',
+  mode: 'pvp',
 };
 
 beforeEach(() => {

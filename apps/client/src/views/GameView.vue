@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { type Cell } from '@ttt/shared';
+import type { BotDifficulty } from '@ttt/shared';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ConnectionBanner from '@/components/ConnectionBanner.vue';
@@ -14,6 +15,11 @@ import { useAuthStore } from '@/stores/auth';
 import { useGameStore } from '@/stores/game';
 
 const EMPTY_BOARD: Cell[] = Array<Cell>(9).fill(null);
+const DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
+  easy: 'лёгкий',
+  medium: 'средний',
+  hard: 'сложный',
+};
 
 const route = useRoute();
 const router = useRouter();
@@ -30,6 +36,13 @@ const needsJoin = computed(() => store.session === null);
 const status = computed(() => statusText(game.value, store.you));
 const tone = computed(() => statusTone(game.value, store.you));
 const inviteLink = computed(() => `${window.location.origin}/game/${code.value}`);
+const isBot = computed(() => store.isBotGame);
+const opponentLabel = computed(() => {
+  const name = store.opponent?.name ?? 'Ожидание';
+  const difficulty = game.value?.botDifficulty;
+  if (!isBot.value || !difficulty) return name;
+  return `${name} · ${DIFFICULTY_LABELS[difficulty]}`;
+});
 const showRematch = computed(() => game.value?.status === 'finished');
 const canVoteRematch = computed(() => store.connection === 'open' && !store.myRematchVote);
 const round = computed(() => game.value?.round ?? 1);
@@ -78,7 +91,10 @@ async function copyInvite(): Promise<void> {
 
 function leave(): void {
   const playing = store.game?.status === 'playing';
-  if (playing && !window.confirm('Партия ещё идёт. Выйти и засчитать победу сопернику?')) return;
+  const question = isBot.value
+    ? 'Партия с ботом ещё идёт. Выйти?'
+    : 'Партия ещё идёт. Выйти и засчитать победу сопернику?';
+  if (playing && !window.confirm(question)) return;
   store.leave();
   void router.push({ name: 'home' });
 }
@@ -88,11 +104,15 @@ function leave(): void {
   <main class="page page--game">
     <header class="gamebar">
       <UiButton variant="ghost" @click="leave">← Выйти</UiButton>
-      <span class="gamebar__code">
+      <span v-if="isBot" class="gamebar__code">
+        Тренировка с ботом
+        <template v-if="round > 1"> · раунд {{ round }}</template>
+      </span>
+      <span v-else class="gamebar__code">
         Комната <b>{{ code }}</b>
         <template v-if="round > 1"> · раунд {{ round }}</template>
       </span>
-      <UiButton variant="ghost" @click="copyInvite">
+      <UiButton v-if="!isBot" variant="ghost" @click="copyInvite">
         {{ copied ? 'Скопировано ✓' : 'Ссылка' }}
       </UiButton>
     </header>
@@ -123,7 +143,7 @@ function leave(): void {
         />
         <span class="players__vs">vs</span>
         <PlayerCard
-          :name="store.opponent?.name ?? 'Ожидание'"
+          :name="opponentLabel"
           :mark="store.opponentMark"
           :connected="store.opponentOnline"
           :active="game?.status === 'playing' && !store.isMyTurn"
@@ -140,7 +160,7 @@ function leave(): void {
 
       <p class="status" :class="`status--${tone}`" role="status" aria-live="polite">{{ status }}</p>
 
-      <div v-if="store.waitingForOpponent" class="invite">
+      <div v-if="store.waitingForOpponent && !isBot" class="invite">
         <span class="muted">Ссылка для друга</span>
         <code class="invite__link">{{ inviteLink }}</code>
       </div>

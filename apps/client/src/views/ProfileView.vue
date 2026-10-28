@@ -33,6 +33,25 @@ const statCards = computed(() => {
   ];
 });
 
+const ratingCards = computed(() => {
+  const value = stats.value;
+  return [
+    { label: 'Рейтинг', value: value?.rating ?? '—', tone: 'rating' },
+    { label: 'Лучший', value: value?.bestRating ?? '—', tone: 'muted' },
+    { label: 'Место', value: value?.rank ?? '—', tone: 'muted' },
+    { label: 'В рейтинге', value: value?.ratedGames ?? 0, tone: 'muted' },
+  ];
+});
+
+const winRate = computed(() => {
+  const value = stats.value;
+  if (!value || value.played === 0) return '—';
+  return `${Math.round((value.wins / value.played) * 100)}%`;
+});
+
+/** Последние пять результатов: свежие слева. */
+const form = computed(() => matches.value.slice(0, 5));
+
 onMounted(() => {
   if (!isGuest.value) void load();
 });
@@ -92,6 +111,11 @@ function resultLabel(result: MatchSummary['result']): string {
   }
 }
 
+function formatDelta(delta: number): string {
+  if (delta > 0) return `+${delta}`;
+  return String(delta);
+}
+
 function formatDate(timestamp: number): string {
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
@@ -112,7 +136,10 @@ function formatDate(timestamp: number): string {
           <template v-if="auth.isGuest"> · гость</template>
         </p>
       </div>
-      <UiButton variant="ghost" @click="router.push({ name: 'home' })">← На главную</UiButton>
+      <div class="profile__head-actions">
+        <UiButton variant="ghost" @click="router.push({ name: 'leaderboard' })">Рейтинг</UiButton>
+        <UiButton variant="ghost" @click="router.push({ name: 'home' })">← На главную</UiButton>
+      </div>
     </header>
 
     <UiCard v-if="isGuest">
@@ -126,6 +153,39 @@ function formatDate(timestamp: number): string {
     </UiCard>
 
     <template v-else>
+      <div class="stats stats--rating">
+        <div
+          v-for="card in ratingCards"
+          :key="card.label"
+          class="stats__card"
+          :class="`stats__card--${card.tone}`"
+        >
+          <span class="stats__value">{{ card.value }}</span>
+          <span class="stats__label">{{ card.label }}</span>
+        </div>
+      </div>
+
+      <div class="profile__summary">
+        <div class="profile__summary-item">
+          <span class="muted">Процент побед</span>
+          <b>{{ winRate }}</b>
+        </div>
+        <div v-if="form.length" class="profile__summary-item">
+          <span class="muted">Форма</span>
+          <span class="form" aria-label="Последние результаты">
+            <span
+              v-for="match in form"
+              :key="match.id"
+              class="form__dot"
+              :class="`form__dot--${match.result}`"
+              role="img"
+              :aria-label="resultLabel(match.result)"
+              :title="resultLabel(match.result)"
+            />
+          </span>
+        </div>
+      </div>
+
       <div class="stats">
         <div v-for="card in statCards" :key="card.label" class="stats__card" :class="`stats__card--${card.tone}`">
           <span class="stats__value">{{ card.value }}</span>
@@ -150,6 +210,13 @@ function formatDate(timestamp: number): string {
             <div class="history__main">
               <span class="history__code">{{ match.code }}</span>
               <span class="muted">раунд {{ match.round }}</span>
+              <span
+                v-if="match.ratingDelta !== null"
+                class="history__delta"
+                :class="match.ratingDelta >= 0 ? 'history__delta--up' : 'history__delta--down'"
+              >
+                {{ formatDelta(match.ratingDelta) }}
+              </span>
               <span class="history__result" :class="`history__result--${match.result}`">
                 {{ resultLabel(match.result) }}
               </span>

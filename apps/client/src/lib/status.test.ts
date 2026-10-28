@@ -18,6 +18,8 @@ function makeGame(overrides: Partial<PublicGame> = {}): PublicGame {
     version: 1,
     round: 1,
     rematchVotes: [],
+    mode: 'pvp',
+    botDifficulty: null,
     createdAt: 0,
     ...overrides,
   };

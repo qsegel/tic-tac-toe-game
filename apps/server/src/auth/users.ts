@@ -1,10 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { RATING_START } from '@ttt/shared';
 
 export interface StoredUser {
   id: string;
   email: string;
   name: string;
   passwordHash: string;
+  rating: number;
+  bestRating: number;
+  ratedGames: number;
   createdAt: number;
 }
 
@@ -13,6 +17,9 @@ interface UserRow {
   email: string;
   name: string;
   password_hash: string;
+  rating: number;
+  best_rating: number;
+  rated_games: number;
   created_at: number;
 }
 
@@ -41,6 +48,9 @@ export class UserStore {
       email: input.email,
       name: input.name,
       passwordHash: input.passwordHash,
+      rating: RATING_START,
+      bestRating: RATING_START,
+      ratedGames: 0,
       createdAt: input.createdAt,
     };
   }
@@ -62,7 +72,10 @@ function toStoredUser(row: UserRow): StoredUser {
     email: row.email,
     name: row.name,
     passwordHash: row.password_hash,
-    createdAt: row.created_at,
+    rating: Number(row.rating),
+    bestRating: Number(row.best_rating),
+    ratedGames: Number(row.rated_games),
+    createdAt: Number(row.created_at),
   };
 }
 

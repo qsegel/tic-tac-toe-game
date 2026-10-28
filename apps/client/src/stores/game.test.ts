@@ -61,6 +61,8 @@ function makeGame(overrides: Partial<PublicGame> = {}): PublicGame {
     version: 1,
     round: 1,
     rematchVotes: [],
+    mode: 'pvp',
+    botDifficulty: null,
     createdAt: 0,
     ...overrides,
   };
@@ -71,6 +73,7 @@ const session = {
   code: 'ABC234',
   playerId: 'player-1',
   mark: 'X' as const,
+  mode: 'pvp' as const,
 };
 
 const SESSION_KEY = 'ttt:session:ABC234';
@@ -111,6 +114,29 @@ describe('game store', () => {
 
     FakeSocket.instances[0]!.open();
     expect(store.connection).toBe('open');
+  });
+
+  it('создаёт партию с ботом и запоминает режим', async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ ...session, mode: 'bot' }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const store = useGameStore();
+    const code = await store.createBot('hard');
+
+    expect(code).toBe('ABC234');
+    expect(store.session?.mode).toBe('bot');
+    expect(store.isBotGame).toBe(true);
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('/api/games/bot');
+    expect(JSON.parse(String(init?.body))).toEqual({ difficulty: 'hard' });
   });
 
   it('применяет снапшот состояния и отправляет ход с версией', async () => {

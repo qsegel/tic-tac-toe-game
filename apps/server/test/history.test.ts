@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { Game, Mark } from '@ttt/shared';
+import type { Game, Mark, StatsResponse } from '@ttt/shared';
 import { applyMove, createGame, joinGame, makeSlot, startRematch } from '@ttt/shared';
 import { openDatabase } from '../src/db.js';
 import { MatchHistory } from '../src/history.js';
@@ -61,6 +61,20 @@ function withDb(t: test.TestContext): { db: ReturnType<typeof openDatabase>; his
   return { db, history: new MatchHistory(db) };
 }
 
+/** Счётчики без рейтинговых полей: они проверяются отдельными тестами. */
+function expectCounts(actual: StatsResponse, expected: Omit<StatsResponse, 'rating' | 'bestRating' | 'ratedGames' | 'rank'>): void {
+  assert.deepEqual(
+    {
+      wins: actual.wins,
+      losses: actual.losses,
+      draws: actual.draws,
+      abandoned: actual.abandoned,
+      played: actual.played,
+    },
+    expected,
+  );
+}
+
 test('победа записывает win победителю и loss проигравшему', (t) => {
   const { history } = withDb(t);
   const finished = xWins(makePlayingGame());
@@ -69,8 +83,8 @@ test('победа записывает win победителю и loss про�
 
   history.record(finished);
 
-  assert.deepEqual(history.stats(X_ID), { wins: 1, losses: 0, draws: 0, abandoned: 0, played: 1 });
-  assert.deepEqual(history.stats(O_ID), { wins: 0, losses: 1, draws: 0, abandoned: 0, played: 1 });
+  expectCounts(history.stats(X_ID), { wins: 1, losses: 0, draws: 0, abandoned: 0, played: 1 });
+  expectCounts(history.stats(O_ID), { wins: 0, losses: 1, draws: 0, abandoned: 0, played: 1 });
 
   const list = history.list(X_ID, 20, 0);
   assert.equal(list.total, 1);
@@ -90,8 +104,8 @@ test('ничья записывается как draw обоим игрокам'
 
   history.record(finished);
 
-  assert.deepEqual(history.stats(X_ID), { wins: 0, losses: 0, draws: 1, abandoned: 0, played: 1 });
-  assert.deepEqual(history.stats(O_ID), { wins: 0, losses: 0, draws: 1, abandoned: 0, played: 1 });
+  expectCounts(history.stats(X_ID), { wins: 0, losses: 0, draws: 1, abandoned: 0, played: 1 });
+  expectCounts(history.stats(O_ID), { wins: 0, losses: 0, draws: 1, abandoned: 0, played: 1 });
 });
 
 test('abandoned: ушедший получает abandoned, оставшийся — win', (t) => {
@@ -107,8 +121,8 @@ test('abandoned: ушедший получает abandoned, оставшийся
 
   history.record(abandoned);
 
-  assert.deepEqual(history.stats(X_ID), { wins: 0, losses: 0, draws: 0, abandoned: 1, played: 1 });
-  assert.deepEqual(history.stats(O_ID), { wins: 1, losses: 0, draws: 0, abandoned: 0, played: 1 });
+  expectCounts(history.stats(X_ID), { wins: 0, losses: 0, draws: 0, abandoned: 1, played: 1 });
+  expectCounts(history.stats(O_ID), { wins: 1, losses: 0, draws: 0, abandoned: 0, played: 1 });
 
   assert.equal(history.list(X_ID, 20, 0).matches[0]?.result, 'abandoned');
   assert.equal(history.list(O_ID, 20, 0).matches[0]?.result, 'win');
@@ -149,8 +163,8 @@ test('каждый рематч — отдельный матч с новым р
   assert.equal(finishedSecond.winner, 'X');
   history.record(finishedSecond);
 
-  assert.deepEqual(history.stats(X_ID), { wins: 1, losses: 1, draws: 0, abandoned: 0, played: 2 });
-  assert.deepEqual(history.stats(O_ID), { wins: 1, losses: 1, draws: 0, abandoned: 0, played: 2 });
+  expectCounts(history.stats(X_ID), { wins: 1, losses: 1, draws: 0, abandoned: 0, played: 2 });
+  expectCounts(history.stats(O_ID), { wins: 1, losses: 1, draws: 0, abandoned: 0, played: 2 });
 
   const list = history.list(X_ID, 20, 0);
   assert.equal(list.total, 2);

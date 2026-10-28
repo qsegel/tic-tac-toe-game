@@ -2,9 +2,11 @@ import type { ClientMessage, ServerMessage } from './protocol.js';
 import { BOARD_SIZE } from './constants.js';
 
 export type {
+  BotDifficulty,
   Cell,
   ErrorCode,
   Game,
+  GameMode,
   GameStatus,
   Mark,
   PlayerSlot,
@@ -33,6 +35,7 @@ export {
 export {
   applyMove,
   checkWinner,
+  createBotGame,
   createGame,
   isBoardFull,
   joinGame,
@@ -44,12 +47,25 @@ export {
   toPublicGame,
 } from './game.js';
 
+export { BOT_DIFFICULTIES, chooseBotMove, isBotDifficulty } from './bot.js';
+
+export {
+  RATING_K,
+  RATING_MIN,
+  RATING_START,
+  expectedScore,
+  nextRating,
+  ratingDelta,
+} from './rating.js';
+
 export type {
   ApiErrorBody,
   AuthResponse,
   AuthUser,
   ClientMessage,
   GameSessionResponse,
+  LeaderboardEntry,
+  LeaderboardResponse,
   MatchListResponse,
   MatchResult,
   MatchSummary,

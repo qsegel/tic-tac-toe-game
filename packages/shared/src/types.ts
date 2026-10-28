@@ -4,6 +4,11 @@ export type Cell = Mark | null;
 export type GameStatus = 'waiting' | 'playing' | 'finished' | 'abandoned';
 export type Winner = Mark | 'draw';
 
+/** Партия с живым соперником или с ботом. */
+export type GameMode = 'pvp' | 'bot';
+
+export type BotDifficulty = 'easy' | 'medium' | 'hard';
+
 export type ErrorCode =
   | 'BAD_REQUEST'
   | 'NOT_FOUND'
@@ -57,6 +62,11 @@ export interface Game {
   round: number;
   /** playerId-ы, нажавшие «ещё раз». */
   rematchVotes: string[];
+  /** `bot` — тренировка с компьютером; такие партии не попадают в историю и рейтинг. */
+  mode: GameMode;
+  botDifficulty: BotDifficulty | null;
+  /** playerId бота. В публичный снапшот не попадает. */
+  botPlayerId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -80,6 +90,8 @@ export interface PublicGame {
   round: number;
   /** Метки игроков, нажавших «ещё раз»: клиент понимает, голосовал ли он сам. */
   rematchVotes: Mark[];
+  mode: GameMode;
+  botDifficulty: BotDifficulty | null;
   createdAt: number;
 }
 

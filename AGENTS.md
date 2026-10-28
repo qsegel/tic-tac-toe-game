@@ -41,8 +41,18 @@ If UI flows changed, also verify the relevant scenario manually.
 - **`round`** starts at 1 and increments on every rematch.
 - **Rematch:** both players vote, the board is cleared, marks are swapped (`X ↔ O`), and `X` moves first again.
 - **`abandoned`:** the player who stays connected gets the win, the player who left gets `abandoned`. If both left, there is no winner.
-- **`PublicGame` does not contain `playerId`.** Do not add player identifiers to it.
+- **Bot games:** `mode: 'bot'`, bot occupies `O` with `playerId = bot_…` and `connected: true` but no socket. Three difficulties (`easy`, `medium`, `hard`); `hard` is minimax and never loses. Bot games are never written to history and never affect rating. A human leaving a bot game deletes the room immediately.
+- **`PublicGame` does not contain `playerId` or `botPlayerId`.** Do not add player identifiers to it. It does expose `mode` and `botDifficulty`.
 - Rooms and unfinished games live **in process memory**. A server restart wipes them.
+
+### Rating
+
+- ELO: start `1000`, `K = 32`, floor `100`, draw = `0.5` (`packages/shared/src/rating.ts`).
+- Only `finished` games with **two `usr_…` players** are rated. `abandoned`, guest games, and bot games never change rating.
+- Rating writes and match insertion happen in the same `BEGIN IMMEDIATE` transaction; `UNIQUE (game_id, round)` makes recording idempotent.
+- `match_players` stores `rating_before` / `rating_after`; `users` stores `rating`, `best_rating`, `rated_games`.
+- Leaderboard includes only users with `rated_games > 0` and never exposes user IDs or emails. It is available to guests.
+- Existing matches stay unrated; do not backfill.
 
 ### Accounts and sessions
 
@@ -50,13 +60,14 @@ If UI flows changed, also verify the relevant scenario manually.
 - Claims: `sub`, `role: user | guest`, `iss: ttt`, `aud: ttt-web`, `exp`.
 - `playerId` is `usr_…` for an account and `guest_…` for a guest. There is no separate player token.
 - Passwords use `scrypt` + `timingSafeEqual`.
-- Guests can play, but `/api/me/stats` and `/api/me/matches` return `403 ACCOUNT_REQUIRED` for them.
+- Guests can play (including against the bot), but `/api/me/stats` and `/api/me/matches` return `403 ACCOUNT_REQUIRED` for them. `/api/leaderboard` is public to any authenticated user, including guests.
 - Logout only clears the cookie; the JWT is not revoked until `exp`.
 
 ### History
 
 - SQLite stores only completed rounds with at least one registered player.
-- A guest-vs-guest game is not saved.
+- A guest-vs-guest game is not saved; a bot game is not saved at all.
+- The rating migration is schema version 2; old rows stay `rated = 0`.
 - Each rematch round is a separate record; duplicates are prevented by `UNIQUE (game_id, round)`.
 - `finished`: the winner gets `win`, the loser gets `loss`, and a draw gives `draw` to both.
 - `abandoned`: the player who stayed gets `win`, the player who left gets `abandoned`; if there is no winner, both get `abandoned`.

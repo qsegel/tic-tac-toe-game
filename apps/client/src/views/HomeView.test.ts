@@ -42,6 +42,7 @@ function authenticatedPinia(): ReturnType<typeof createPinia> {
     email: 'anya@example.com',
     name: 'Аня',
     guest: false,
+    rating: 1000,
     createdAt: 0,
   };
   return pinia;
@@ -80,6 +81,7 @@ describe('HomeView', () => {
             code: 'QWE234',
             playerId: 'usr_1',
             mark: 'X',
+            mode: 'pvp',
           }),
           { status: 201, headers: { 'content-type': 'application/json' } },
         ),
@@ -95,6 +97,43 @@ describe('HomeView', () => {
 
     expect(router.currentRoute.value.name).toBe('game');
     expect(router.currentRoute.value.params.code).toBe('QWE234');
+  });
+
+  it('запускает игру с ботом выбранной сложности', async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            gameId: 'game-bot',
+            code: 'BOT234',
+            playerId: 'usr_1',
+            mark: 'X',
+            mode: 'bot',
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const router = createTestRouter();
+    await router.push('/');
+    const wrapper = mount(HomeView, { global: { plugins: [authenticatedPinia(), router] } });
+
+    const difficultyButtons = wrapper.findAll('.difficulty__item');
+    expect(difficultyButtons).toHaveLength(3);
+    await difficultyButtons[2]!.trigger('click');
+
+    const startButton = wrapper.findAll('button').find((button) => button.text().includes('Играть с ботом'));
+    expect(startButton).toBeDefined();
+    await startButton!.trigger('click');
+    await flushPromises();
+
+    expect(router.currentRoute.value.name).toBe('game');
+    expect(router.currentRoute.value.params.code).toBe('BOT234');
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('/api/games/bot');
+    expect(JSON.parse(String(init?.body))).toEqual({ difficulty: 'hard' });
   });
 
   it('без авторизации показывает приглашение войти вместо форм', async () => {

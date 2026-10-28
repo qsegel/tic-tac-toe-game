@@ -110,6 +110,7 @@ export class AuthService {
       email: null,
       name,
       guest: true,
+      rating: null,
       createdAt: Date.now(),
     };
     return { user, token: this.issueToken(user) };
@@ -168,6 +169,7 @@ export class AuthService {
         email: null,
         name: sanitizeName(claims.name) ?? 'Гость',
         guest: true,
+        rating: null,
         createdAt: claims.iat ? claims.iat * 1000 : Date.now(),
       };
     }
@@ -218,6 +220,7 @@ function toAuthUser(user: {
   id: string;
   email: string;
   name: string;
+  rating: number;
   createdAt: number;
 }): AuthUser {
   return {
@@ -225,6 +228,7 @@ function toAuthUser(user: {
     email: user.email,
     name: user.name,
     guest: false,
+    rating: user.rating,
     createdAt: user.createdAt,
   };
 }

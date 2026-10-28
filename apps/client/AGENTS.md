@@ -26,6 +26,7 @@ Store: `src/stores/auth.ts`.
 - `/` — `HomeView`.
 - `/auth` — `AuthView`; a registered user is redirected to `redirect` or `/`.
 - `/profile` — `ProfileView`, requires authentication.
+- `/leaderboard` — `LeaderboardView`, requires authentication (guests can view it too).
 - `/game/:code` — `GameView`, requires authentication.
 - The guard first waits for `auth.bootstrap()`, then checks `meta.requiresAuth`.
 - `safeRedirect()` allows only internal paths: starts with `/`, not `//`, and contains no `\` or control characters.
@@ -34,7 +35,7 @@ Store: `src/stores/auth.ts`.
 ## Game session
 
 - User identity comes from the cookie and is shared across tabs.
-- The game session (`gameId`, `code`, `playerId`, `mark`) lives in `sessionStorage`, so each tab has its own game.
+- The game session (`gameId`, `code`, `playerId`, `mark`, `mode`) lives in `sessionStorage`, so each tab has its own game. Old saved sessions without `mode` are loaded as `pvp`.
 - The guest name lives in `localStorage` so it does not have to be re-entered.
 - After a rematch the marks are swapped; take the current mark from `state.you`, not from the old session.
 - Do not store tokens in the session: they no longer exist.
@@ -56,6 +57,7 @@ File: `src/stores/game.ts`.
 
 - `enter(code)` loads the saved session and connects the socket; changing the code closes the old one.
 - `create()` and `join(code)` call the API and save the session.
+- `createBot(difficulty)` calls `POST /api/games/bot`, saves the session, and connects. `isBotGame` reflects `game.mode` or `session.mode`.
 - `play(index)` sends a move only when `canPlay` is true; after sending it waits for `state` (`awaitingState`).
 - `voteRematch()` sends a vote only when the socket is open and the player has not voted yet.
 - `leave()` sends `leave`, clears the session, and closes the socket.
@@ -66,10 +68,11 @@ File: `src/stores/game.ts`.
 
 ## Views and UI
 
-- `views/HomeView.vue` — CTA for unauthenticated users, create/join room for authenticated users.
+- `views/HomeView.vue` — CTA for unauthenticated users, create/join room and the bot card with difficulty for authenticated users.
 - `views/AuthView.vue` — login, registration, guest; the mode is stored in the `mode` query.
-- `views/GameView.vue` — board, players, status, rematch, invite; join card for invite links.
-- `views/ProfileView.vue` — stats and history; guests see a registration prompt.
+- `views/GameView.vue` — board, players, status, rematch, invite; join card for invite links. In a bot game the room code/invite is hidden and the opponent shows the difficulty.
+- `views/ProfileView.vue` — rating cards (current/best/rank/rated games), win rate, recent form, stats and history with rating deltas; guests see a registration prompt.
+- `views/LeaderboardView.vue` — paginated leaderboard, highlights the current user, shows their position even when it is off-page.
 - `components/ui/*` — `UiButton`, `UiInput`, `UiCard`, `UiError`.
 - Component styles use CSS modules; shared classes and themes live in `src/styles.css`.
 - Copy and errors are in Russian; preserve accessibility (`aria-live`, labels, keyboard support).
@@ -83,8 +86,10 @@ npm run typecheck -w @ttt/client
 
 - Vitest + jsdom + Vue Test Utils.
 - `src/stores/auth.test.ts` — bootstrap, login, guest, logout.
-- `src/stores/game.test.ts` — create/join, snapshots, reconnect, close reasons, rematch.
-- `src/views/HomeView.test.ts` — CTA without auth and game creation.
+- `src/stores/game.test.ts` — create/join, bot creation, snapshots, reconnect, close reasons, rematch.
+- `src/views/HomeView.test.ts` — CTA without auth, game creation, bot start with difficulty.
+- `src/views/ProfileView.test.ts` — rating dashboard, form, rating delta.
+- `src/views/LeaderboardView.test.ts` — table, own-row highlight, off-page position, empty state.
 - `src/lib/*.test.ts` — session and status texts.
 - Stub `fetch` and `WebSocket` in tests; do not start a real server.
 

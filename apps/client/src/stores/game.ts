@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref, shallowRef } from 'vue';
-import type { ClientMessage, Mark, PublicGame, ServerMessage } from '@ttt/shared';
-import { ApiError, createGame, joinGame, websocketUrl } from '@/lib/api';
+import type { BotDifficulty, ClientMessage, Mark, PublicGame, ServerMessage } from '@ttt/shared';
+import { ApiError, createBotGame, createGame, joinGame, websocketUrl } from '@/lib/api';
 import { clearSession, loadSession, saveSession, type Session } from '@/lib/session';
 import { useAuthStore } from '@/stores/auth';
 
@@ -57,6 +57,7 @@ export const useGameStore = defineStore('game', () => {
   });
 
   const opponentOnline = computed(() => opponent.value?.connected === true);
+  const isBotGame = computed(() => (game.value?.mode ?? session.value?.mode) === 'bot');
   const isMyTurn = computed(() => game.value?.status === 'playing' && game.value.turn === you.value);
   const canPlay = computed(() => isMyTurn.value && connection.value === 'open');
   const rematchVotes = computed(() => game.value?.rematchVotes.length ?? 0);
@@ -324,6 +325,23 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  async function createBot(difficulty: BotDifficulty): Promise<string> {
+    setError(null);
+    try {
+      const response = await createBotGame(difficulty);
+      const next: Session = { ...response };
+      saveSession(next);
+      session.value = next;
+      clearGameState();
+      you.value = next.mark;
+      connect(true);
+      return next.code;
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Не удалось начать игру с ботом');
+      throw cause;
+    }
+  }
+
   async function join(code: string): Promise<void> {
     setError(null);
     try {
@@ -379,6 +397,7 @@ export const useGameStore = defineStore('game', () => {
     opponent,
     opponentMark,
     opponentOnline,
+    isBotGame,
     isMyTurn,
     canPlay,
     rematchVotes,
@@ -387,6 +406,7 @@ export const useGameStore = defineStore('game', () => {
     waitingForOpponent,
     enter,
     create,
+    createBot,
     join,
     play,
     voteRematch,

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { toPublicGame } from '@ttt/shared';
-import type { GameSessionResponse } from '@ttt/shared';
+import { BOT_DIFFICULTIES, toPublicGame } from '@ttt/shared';
+import type { BotDifficulty, GameSessionResponse } from '@ttt/shared';
 import type { RoomRegistry } from './rooms.js';
 
 const codeParamsSchema = {
@@ -11,8 +11,16 @@ const codeParamsSchema = {
   },
 } as const;
 
+const botBodySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    difficulty: { type: 'string', enum: [...BOT_DIFFICULTIES] },
+  },
+} as const;
+
 function sessionBody(result: {
-  game: { id: string; code: string };
+  game: { id: string; code: string; mode: GameSessionResponse['mode'] };
   playerId: string;
   mark: 'X' | 'O';
 }): GameSessionResponse {
@@ -21,6 +29,7 @@ function sessionBody(result: {
     code: result.game.code,
     playerId: result.playerId,
     mark: result.mark,
+    mode: result.game.mode,
   };
 }
 
@@ -35,6 +44,20 @@ export function registerRoutes(app: FastifyInstance, registry: RoomRegistry): vo
     },
     async (request, reply) => {
       const result = registry.create(request.authUser.id, request.authUser.name);
+      return reply.code(201).send(sessionBody(result));
+    },
+  );
+
+  app.post<{ Body: { difficulty?: BotDifficulty } }>(
+    '/api/games/bot',
+    {
+      schema: { body: botBodySchema },
+      preHandler: app.authenticate,
+      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+    },
+    async (request, reply) => {
+      const difficulty = request.body?.difficulty ?? 'medium';
+      const result = registry.createBot(request.authUser.id, request.authUser.name, difficulty);
       return reply.code(201).send(sessionBody(result));
     },
   );

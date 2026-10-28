@@ -49,6 +49,7 @@ File: `src/db.ts`. Uses `node:sqlite` (`DatabaseSync`).
 - Never edit an existing migration after the fact: add the next one.
 - History writes use a `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` transaction.
 - Tables: `users`, `matches`, `match_players`; round uniqueness is enforced by `UNIQUE (game_id, round)`.
+- Migration v1 creates history tables; migration v2 adds rating columns (`users.rating/best_rating/rated_games`, `matches.rated`, `match_players.rating_before/rating_after`) and the rating index. Both run sequentially based on `user_version`.
 - Do not commit database files or `-wal`/`-shm` files.
 
 ## Rooms
@@ -57,12 +58,16 @@ File: `src/rooms.ts`.
 
 - `RoomRegistry` stores `Game` objects in memory; identity is `playerId` (`usr_…` / `guest_…`).
 - `subscribe(listener)` is the only way to subscribe to changes; do not add a second mechanism.
-- `create`, `join`, `attach`, `detach`, `leave`, `move`, `rematch`, `sweep`.
+- `create`, `createBot`, `join`, `attach`, `detach`, `leave`, `move`, `rematch`, `sweep`.
 - `join` is idempotent for a player who has already joined.
 - `detach` starts the grace period; afterwards the game becomes `abandoned` or the waiting room is deleted.
 - On `abandoned`, the winner is set only if the opponent stayed connected.
-- `sweep` deletes rooms without connected players after the TTL.
-- Do not store tokens in `PlayerSlot`, and do not add `playerId` to the public snapshot.
+- `sweep` deletes rooms without connected players after the TTL; a bot counts as disconnected for this purpose (`hasHumanConnected`).
+- `createBot(playerId, name, difficulty)` builds a game with `mode: 'bot'`; the bot is `O`, `connected: true`, `playerId = bot_…`, no socket. It schedules a grace timer for the human until their socket attaches.
+- `maybeScheduleBot` plans a bot move only when `status === 'playing'`, the bot is on turn, and the version still matches; it re-reads the stored game inside the timer. `BOT_DELAY_MS` / `botDelayMs` controls the pause; `botRandom` is injectable for tests.
+- In `rematch`, after the human votes the bot votes immediately, so the next round starts without waiting.
+- `leave`/abandon on a bot game deletes the room immediately.
+- Do not store tokens in `PlayerSlot`, and do not add `playerId` or `botPlayerId` to the public snapshot.
 
 ## WebSocket
 
@@ -82,9 +87,11 @@ File: `src/history.ts`; routes — `src/profile.ts`.
 
 - `record(game)` is called through a `RoomRegistry` subscription and is idempotent.
 - Only `finished`/`abandoned` games with two players and at least one `usr_…` are recorded.
-- A guest-vs-guest game is not recorded.
+- A guest-vs-guest game is not recorded. A `mode: 'bot'` game is not recorded at all.
 - `resultFor`: win/loss/draw for finished games; win/abandoned for abandoned games.
-- `stats` and `list` read only the current user's rows in `match_players`.
+- Rating applies only when `status === 'finished'`, `winner !== null`, and both players are `usr_…`. Read both ratings before writing either; store `rating_before`/`rating_after` per mark; update `best_rating` with `MAX` and increment `rated_games`.
+- `stats` and `list` read only the current user's rows in `match_players`; `stats` also reads the user's rating row and computes `rank` from the same ordering as the leaderboard.
+- `leaderboard(limit, offset, meId)` uses `ROW_NUMBER() OVER (ORDER BY rating DESC, rated_games DESC, created_at ASC)` and filters `rated_games > 0`. Return only name/rating/record/position/`isMe` — never user IDs. `me` must use the same W/L/D subqueries as the page rows.
 - Do not rely on the subscriber order between WS and history: deduplication is guaranteed by the unique index, not by call order.
 
 ## Errors
@@ -103,7 +110,10 @@ npm run typecheck -w @ttt/server
 
 - `test/api.test.ts` — HTTP + WebSocket, rooms, limits, reconnect, abandoned.
 - `test/auth.test.ts` — registration, login, guest, logout, CSRF.
+- `test/bot.test.ts` — bot creation, first move, full game, rematch, guest, invalid difficulty, leave.
 - `test/history.test.ts` — win/loss/draw/abandoned, rematches, guests, pagination.
+- `test/leaderboard.test.ts` — end-to-end rating change, `/api/me/stats`, `/api/auth/me`, `/api/leaderboard`, history delta.
+- `test/rating.test.ts` — ELO writes, draws, abandoned, guests, bot exclusion, idempotency, leaderboard ordering/pagination/`me`.
 - `test/logging.test.ts` — secret redaction in URLs.
 
 For integration tests, start a real server on `port: 0` and use `fetch`/`ws`,

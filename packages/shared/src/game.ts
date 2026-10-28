@@ -1,6 +1,6 @@
 import { BOARD_SIZE, NAME_MAX_LENGTH, WIN_LINES } from './constants.js';
 import { GameError } from './types.js';
-import type { Cell, Game, Mark, PlayerSlot, PublicGame } from './types.js';
+import type { BotDifficulty, Cell, Game, Mark, PlayerSlot, PublicGame } from './types.js';
 
 export function makeSlot(input: { playerId: string; name: string }): PlayerSlot {
   return {
@@ -24,8 +24,44 @@ export function createGame(input: { id: string; code: string; host: PlayerSlot; 
     version: 0,
     round: 1,
     rematchVotes: [],
+    mode: 'pvp',
+    botDifficulty: null,
+    botPlayerId: null,
     createdAt: input.now,
     updatedAt: input.now,
+  };
+}
+
+/**
+ * Партия с ботом: второй слот занят сразу, поэтому комната не ждёт игрока.
+ * Бот считается подключённым — у него нет сокета, но и «бросить» партию он не может.
+ */
+export function createBotGame(input: {
+  id: string;
+  code: string;
+  host: PlayerSlot;
+  botId: string;
+  botName: string;
+  difficulty: BotDifficulty;
+  now: number;
+}): Game {
+  const game = createGame({ id: input.id, code: input.code, host: input.host, now: input.now });
+  return {
+    ...game,
+    players: {
+      X: { ...input.host },
+      O: {
+        playerId: input.botId,
+        name: input.botName,
+        connected: true,
+        disconnectedAt: null,
+      },
+    },
+    status: 'playing',
+    mode: 'bot',
+    botDifficulty: input.difficulty,
+    botPlayerId: input.botId,
+    version: 1,
   };
 }
 
@@ -212,6 +248,8 @@ export function toPublicGame(game: Game): PublicGame {
       const mark = markOf(game, playerId);
       return mark ? [mark] : [];
     }),
+    mode: game.mode,
+    botDifficulty: game.botDifficulty,
     createdAt: game.createdAt,
   };
 }

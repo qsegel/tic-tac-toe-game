@@ -21,6 +21,12 @@ export const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/leaderboard',
+      name: 'leaderboard',
+      component: () => import('@/views/LeaderboardView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/game/:code',
       name: 'game',
       component: () => import('@/views/GameView.vue'),
@@ -53,6 +59,8 @@ router.afterEach((to) => {
     document.title = `Вход — ${DEFAULT_TITLE}`;
   } else if (to.name === 'profile') {
     document.title = `Мои партии — ${DEFAULT_TITLE}`;
+  } else if (to.name === 'leaderboard') {
+    document.title = `Рейтинг — ${DEFAULT_TITLE}`;
   } else {
     document.title = DEFAULT_TITLE;
   }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CODE_ALPHABET, CODE_LENGTH } from '@ttt/shared';
+import type { BotDifficulty } from '@ttt/shared';
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import UiButton from '@/components/ui/UiButton.vue';
@@ -15,7 +16,14 @@ const auth = useAuthStore();
 const store = useGameStore();
 
 const code = ref('');
-const busy = ref<'create' | 'join' | null>(null);
+const busy = ref<'create' | 'join' | 'bot' | null>(null);
+const difficulty = ref<BotDifficulty>('medium');
+
+const difficulties: Array<{ value: BotDifficulty; label: string }> = [
+  { value: 'easy', label: 'Лёгкий' },
+  { value: 'medium', label: 'Средний' },
+  { value: 'hard', label: 'Сложный' },
+];
 
 const userLabel = computed(() => {
   if (!auth.user) return '';
@@ -48,6 +56,18 @@ async function create(): Promise<void> {
   busy.value = 'create';
   try {
     const created = await store.create();
+    await router.push({ name: 'game', params: { code: created } });
+  } catch (cause) {
+    handleError(cause);
+  } finally {
+    busy.value = null;
+  }
+}
+
+async function startBot(): Promise<void> {
+  busy.value = 'bot';
+  try {
+    const created = await store.createBot(difficulty.value);
     await router.push({ name: 'game', params: { code: created } });
   } catch (cause) {
     handleError(cause);
@@ -133,6 +153,33 @@ async function join(): Promise<void> {
         <UiError :message="store.error" />
       </UiCard>
 
+      <UiCard>
+        <div class="profile__section-head">
+          <h2 class="home__title">Игра с ботом</h2>
+          <span class="muted">тренировка</span>
+        </div>
+        <p class="muted">
+          Соперник не нужен. Такие партии не сохраняются в истории и не влияют на рейтинг.
+        </p>
+        <div class="difficulty" role="radiogroup" aria-label="Сложность бота">
+          <button
+            v-for="option in difficulties"
+            :key="option.value"
+            type="button"
+            role="radio"
+            class="difficulty__item"
+            :class="{ 'difficulty__item--active': difficulty === option.value }"
+            :aria-checked="difficulty === option.value"
+            @click="difficulty = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <UiButton variant="secondary" block :disabled="busy !== null" @click="startBot">
+          {{ busy === 'bot' ? 'Готовим партию…' : 'Играть с ботом' }}
+        </UiButton>
+      </UiCard>
+
       <p v-if="auth.isGuest" class="muted home__guest">
         Вы играете гостем: история и статистика не сохраняются.
         <RouterLink to="/auth?mode=register">Зарегистрироваться</RouterLink>
@@ -141,6 +188,7 @@ async function join(): Promise<void> {
 
     <ul class="hints">
       <li>Для игры вдвоём в одном браузере нужны два аккаунта или окно инкогнито.</li>
+      <li>Хотите попробовать без соперника — сыграйте с ботом.</li>
       <li>Короткий обрыв связи не прерывает партию — можно вернуться.</li>
     </ul>
   </main>

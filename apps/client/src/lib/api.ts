@@ -1,7 +1,9 @@
 import type {
   ApiErrorBody,
   AuthResponse,
+  BotDifficulty,
   GameSessionResponse,
+  LeaderboardResponse,
   MatchListResponse,
   StatsResponse,
 } from '@ttt/shared';
@@ -121,6 +123,10 @@ export function createGame(): Promise<GameSessionResponse> {
   return request<GameSessionResponse>('/api/games', { method: 'POST' });
 }
 
+export function createBotGame(difficulty: BotDifficulty): Promise<GameSessionResponse> {
+  return request<GameSessionResponse>('/api/games/bot', jsonBody({ difficulty }));
+}
+
 export function joinGame(code: string): Promise<GameSessionResponse> {
   return request<GameSessionResponse>(`/api/games/${encodeURIComponent(code)}/join`, { method: 'POST' });
 }
@@ -131,4 +137,8 @@ export function fetchStats(): Promise<StatsResponse> {
 
 export function fetchMatches(limit = 20, offset = 0): Promise<MatchListResponse> {
   return request<MatchListResponse>(`/api/me/matches?limit=${limit}&offset=${offset}`);
+}
+
+export function fetchLeaderboard(limit = 20, offset = 0): Promise<LeaderboardResponse> {
+  return request<LeaderboardResponse>(`/api/leaderboard?limit=${limit}&offset=${offset}`);
 }
