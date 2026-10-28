@@ -99,6 +99,31 @@ describe('HomeView', () => {
     expect(router.currentRoute.value.params.code).toBe('QWE234');
   });
 
+  it('при 401 очищает пользователя и уводит на вход', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: 'Требуется вход' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+    const router = createTestRouter();
+    await router.push('/');
+    const pinia = authenticatedPinia();
+    const wrapper = mount(HomeView, { global: { plugins: [pinia, router] } });
+
+    await wrapper.find('form.create').trigger('submit');
+    await flushPromises();
+
+    expect(router.currentRoute.value.name).toBe('auth');
+    expect(router.currentRoute.value.query.redirect).toBe('/');
+    expect(useAuthStore().user).toBeNull();
+    expect(useAuthStore().error).toContain('Сессия');
+  });
+
   it('запускает игру с ботом выбранной сложности', async () => {
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>

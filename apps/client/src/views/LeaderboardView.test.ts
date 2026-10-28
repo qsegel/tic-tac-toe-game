@@ -26,6 +26,13 @@ function mockLeaderboard(body: unknown): void {
   );
 }
 
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -84,5 +91,38 @@ describe('LeaderboardView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('Пока никто не сыграл рейтинговую партию');
+  });
+
+  it('не дублирует строки при сдвиге offset между страницами', async () => {
+    const entry = (position: number, name: string) => ({
+      position,
+      name,
+      rating: 1000 - position,
+      games: 1,
+      wins: 0,
+      losses: 1,
+      draws: 0,
+      isMe: false,
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const offset = Number(new URL(url, 'http://localhost').searchParams.get('offset'));
+        const entries = offset === 0 ? [entry(1, 'Аня'), entry(2, 'Боб')] : [entry(2, 'Боб'), entry(3, 'Вера')];
+        return jsonResponse({ entries, total: 3, hasMore: offset === 0, me: null });
+      }),
+    );
+
+    const router = createTestRouter();
+    await router.push('/leaderboard');
+    const wrapper = mount(LeaderboardView, { global: { plugins: [createPinia(), router] } });
+    await flushPromises();
+
+    await wrapper.findAll('button').find((button) => button.text().includes('Показать ещё'))!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findAll('.leaderboard__row')).toHaveLength(3);
+    expect(wrapper.text()).toContain('Вера');
   });
 });

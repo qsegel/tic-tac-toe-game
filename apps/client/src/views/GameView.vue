@@ -9,7 +9,9 @@ import PlayerCard from '@/components/PlayerCard.vue';
 import UiButton from '@/components/ui/UiButton.vue';
 import UiCard from '@/components/ui/UiCard.vue';
 import UiError from '@/components/ui/UiError.vue';
+import { CODE_LENGTH } from '@ttt/shared';
 import { ApiError } from '@/lib/api';
+import { isGameCode } from '@/lib/session';
 import { statusText, statusTone } from '@/lib/status';
 import { useAuthStore } from '@/stores/auth';
 import { useGameStore } from '@/stores/game';
@@ -44,10 +46,13 @@ const opponentLabel = computed(() => {
   return `${name} · ${DIFFICULTY_LABELS[difficulty]}`;
 });
 const showRematch = computed(() => game.value?.status === 'finished');
-const canVoteRematch = computed(() => store.connection === 'open' && !store.myRematchVote);
+const canVoteRematch = computed(
+  () => store.connection === 'open' && !store.myRematchVote && !store.pendingRematch,
+);
 const round = computed(() => game.value?.round ?? 1);
 const rematchLabel = computed(() => {
   if (store.connection !== 'open') return 'Нет соединения…';
+  if (store.pendingRematch) return 'Отправляем…';
   if (store.myRematchVote) return 'Ждём соперника…';
   if (store.opponentRematchVote) return 'Соперник готов — начать';
   return 'Играть ещё раз';
@@ -57,18 +62,37 @@ store.enter(code.value);
 
 watch(code, (next) => store.enter(next));
 
+// Истёкшая cookie: стор уже очистил игровые данные, уводим на вход.
+watch(
+  () => store.sessionExpired,
+  (expired) => {
+    if (!expired) return;
+    store.clearSessionExpired();
+    auth.setError('Сессия истекла — войдите снова');
+    void router.replace({ name: 'auth', query: { redirect: route.fullPath } });
+  },
+);
+
 onUnmounted(() => {
   if (copiedTimer) clearTimeout(copiedTimer);
   store.disconnect();
 });
 
 async function join(): Promise<void> {
+  if (busy.value) return;
+  if (!isGameCode(code.value)) {
+    store.setError(`Код комнаты состоит из ${CODE_LENGTH} символов`);
+    return;
+  }
+
   busy.value = true;
   try {
     await store.join(code.value);
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
-      await router.push({ name: 'auth', query: { redirect: route.fullPath } });
+      auth.clear();
+      auth.setError('Сессия истекла — войдите снова');
+      await router.replace({ name: 'auth', query: { redirect: route.fullPath } });
     }
   } finally {
     busy.value = false;
@@ -159,6 +183,9 @@ function leave(): void {
       />
 
       <p class="status" :class="`status--${tone}`" role="status" aria-live="polite">{{ status }}</p>
+      <p v-if="store.pendingMove" class="muted" role="status" aria-live="polite">
+        Ход отправлен, ждём ответ сервера…
+      </p>
 
       <div v-if="store.waitingForOpponent && !isBot" class="invite">
         <span class="muted">Ссылка для друга</span>

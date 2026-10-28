@@ -47,12 +47,14 @@ function goAuth(mode: 'login' | 'register' | 'guest'): void {
 }
 
 function handleError(cause: unknown): void {
-  if (cause instanceof ApiError && cause.status === 401) {
-    goAuth('login');
-  }
+  if (!(cause instanceof ApiError) || cause.status !== 401) return;
+  auth.clear();
+  auth.setError('Сессия истекла — войдите снова');
+  goAuth('login');
 }
 
 async function create(): Promise<void> {
+  if (busy.value !== null) return;
   busy.value = 'create';
   try {
     const created = await store.create();
@@ -65,6 +67,7 @@ async function create(): Promise<void> {
 }
 
 async function startBot(): Promise<void> {
+  if (busy.value !== null) return;
   busy.value = 'bot';
   try {
     const created = await store.createBot(difficulty.value);
@@ -77,6 +80,7 @@ async function startBot(): Promise<void> {
 }
 
 async function join(): Promise<void> {
+  if (busy.value !== null) return;
   if (code.value.length !== CODE_LENGTH) {
     store.setError(`Код комнаты состоит из ${CODE_LENGTH} символов`);
     return;
@@ -161,15 +165,14 @@ async function join(): Promise<void> {
         <p class="muted">
           Соперник не нужен. Такие партии не сохраняются в истории и не влияют на рейтинг.
         </p>
-        <div class="difficulty" role="radiogroup" aria-label="Сложность бота">
+        <div class="difficulty" role="group" aria-label="Сложность бота">
           <button
             v-for="option in difficulties"
             :key="option.value"
             type="button"
-            role="radio"
             class="difficulty__item"
             :class="{ 'difficulty__item--active': difficulty === option.value }"
-            :aria-checked="difficulty === option.value"
+            :aria-pressed="difficulty === option.value"
             @click="difficulty = option.value"
           >
             {{ option.label }}

@@ -48,7 +48,15 @@ async function loadMore(): Promise<void> {
   error.value = null;
   try {
     const page = await fetchLeaderboard(PAGE_SIZE, entries.value.length);
-    entries.value = [...entries.value, ...page.entries];
+    const seen = new Set(entries.value.map((entry) => `${entry.position}-${entry.name}`));
+    const merged = [...entries.value];
+    for (const entry of page.entries) {
+      const key = `${entry.position}-${entry.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(entry);
+    }
+    entries.value = merged;
     me.value = page.me;
     total.value = page.total;
     hasMore.value = page.hasMore;
@@ -63,7 +71,11 @@ async function loadMore(): Promise<void> {
 async function handleAuthError(cause: unknown): Promise<boolean> {
   if (!(cause instanceof ApiError) || cause.status !== 401) return false;
   auth.clear();
-  await router.replace({ name: 'auth', query: { redirect: '/leaderboard' } });
+  auth.setError('Сессия истекла — войдите снова');
+  await router.replace({
+    name: 'auth',
+    query: { redirect: router.currentRoute.value.fullPath },
+  });
   return true;
 }
 </script>
@@ -130,7 +142,9 @@ async function handleAuthError(cause: unknown): Promise<boolean> {
 
       <p v-if="auth.isGuest" class="muted">
         Вы играете гостем: партии не попадают в рейтинг.
-        <RouterLink to="/auth?mode=register">Зарегистрироваться</RouterLink>
+        <RouterLink :to="{ name: 'auth', query: { mode: 'register', redirect: '/leaderboard' } }">
+          Зарегистрироваться
+        </RouterLink>
       </p>
     </UiCard>
   </main>

@@ -74,15 +74,30 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout(): Promise<void> {
+  /**
+   * Выход считается успешным, если сервер ответил или cookie уже недействительна.
+   * При сетевой ошибке пользователя не разлогиниваем: иначе httpOnly-cookie
+   * останется, и после перезагрузки `/api/auth/me` снова его авторизует.
+   */
+  async function logout(): Promise<boolean> {
+    busy.value = true;
+    error.value = null;
     try {
       await apiLogout();
-    } catch {
-      // даже если сервер недоступен, локально сессию сбрасываем
-    } finally {
       user.value = null;
       ready.value = true;
-      error.value = null;
+      return true;
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) {
+        user.value = null;
+        ready.value = true;
+        return true;
+      }
+      error.value =
+        cause instanceof ApiError ? cause.message : 'Не удалось выйти — проверьте соединение';
+      return false;
+    } finally {
+      busy.value = false;
     }
   }
 

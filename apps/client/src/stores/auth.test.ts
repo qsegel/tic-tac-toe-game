@@ -81,8 +81,37 @@ describe('auth store', () => {
 
     const auth = useAuthStore();
     auth.user = user;
-    await auth.logout();
 
+    await expect(auth.logout()).resolves.toBe(true);
     expect(auth.user).toBeNull();
+  });
+
+  it('считает 401 при выходе успешным выходом', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ code: 'UNAUTHORIZED', message: 'Требуется вход' }, 401)),
+    );
+
+    const auth = useAuthStore();
+    auth.user = user;
+
+    await expect(auth.logout()).resolves.toBe(true);
+    expect(auth.user).toBeNull();
+  });
+
+  it('не разлогинивает при сетевой ошибке', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('failed to fetch');
+      }),
+    );
+
+    const auth = useAuthStore();
+    auth.user = user;
+
+    await expect(auth.logout()).resolves.toBe(false);
+    expect(auth.user).toEqual(user);
+    expect(auth.error).toBeTruthy();
   });
 });

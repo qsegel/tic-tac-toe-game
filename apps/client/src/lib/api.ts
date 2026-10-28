@@ -20,18 +20,34 @@ export class ApiError extends Error {
   }
 }
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? '';
-const WS_BASE_URL = import.meta.env.VITE_WS_URL ?? '';
+/** Убираем хвостовые слэши: иначе `/api/...` превращается в `//api/...`. */
+function withoutTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+const BASE_URL = withoutTrailingSlash(import.meta.env.VITE_API_URL ?? '');
+const WS_BASE_URL = withoutTrailingSlash(import.meta.env.VITE_WS_URL ?? '');
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * Адрес сокета строится по тем же правилам, что и HTTP-база:
  * явный `VITE_WS_URL` → origin API → текущий origin.
+ *
+ * `wss:` сохраняем отдельно: на HTTPS-странице `ws:` будет заблокирован
+ * браузером как mixed content.
  */
 export function websocketUrl(code: string): string {
   const base = WS_BASE_URL || apiOrigin() || window.location.origin;
-  const url = new URL('/ws', base);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+
+  let url: URL;
+  try {
+    url = new URL('/ws', base);
+  } catch {
+    // Некорректный VITE_WS_URL не должен ломать игровой экран.
+    url = new URL('/ws', window.location.origin);
+  }
+
+  url.protocol = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
   url.searchParams.set('code', code.toUpperCase());
   return url.toString();
 }
@@ -71,9 +87,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const text = await response.text();
   let data: unknown = null;
+  let parsed = false;
   if (text) {
     try {
       data = JSON.parse(text);
+      parsed = true;
     } catch {
       data = null;
     }
@@ -86,6 +104,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       body?.code ?? 'INTERNAL',
       response.status,
     );
+  }
+
+  // Пустой ответ допустим только для 204; иначе клиент получит `null`
+  // и построит сессию с `undefined` вместо кода комнаты.
+  if (text && !parsed) {
+    throw new ApiError('Сервер вернул некорректный ответ', 'BAD_RESPONSE', response.status);
   }
 
   return data as T;

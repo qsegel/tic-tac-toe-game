@@ -66,12 +66,27 @@ router.afterEach((to) => {
   }
 });
 
-/** Не даём увести редиректом на внешний сайт. */
+/** Не даём увести редиректом на внешний сайт или обратно на страницу входа. */
 export function safeRedirect(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   if (!value.startsWith('/') || value.startsWith('//')) return null;
   // Браузеры трактуют обратный слэш как разделитель пути: `/\evil.com`
   // иначе превратился бы в `//evil.com`. Управляющие символы тоже отсекаем.
   if (value.includes('\\') || /[\u0000-\u001f\u007f]/.test(value)) return null;
+
+  // Проверяем путь после декодирования: `/%61uth` — это тот же `/auth`,
+  // а редирект на страницу входа из guard-а дал бы бесконечный цикл.
+  let path = value.split(/[?#]/, 1)[0] ?? '';
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    return null;
+  }
+
+  if (path.includes('\\') || /[\u0000-\u001f\u007f]/.test(path)) return null;
+
+  const normalized = path.toLowerCase();
+  if (normalized === '/auth' || normalized.startsWith('/auth/')) return null;
+
   return value;
 }

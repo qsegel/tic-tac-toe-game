@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearSession, loadName, loadSession, saveName, saveSession, type Session } from './session';
+import {
+  clearSession,
+  isGameCode,
+  loadName,
+  loadSession,
+  saveName,
+  saveSession,
+  type Session,
+} from './session';
 
 const session: Session = {
   gameId: 'game-1',
@@ -53,6 +61,36 @@ describe('session', () => {
     sessionStorage.setItem('ttt:session:ABC234', JSON.stringify({ ...session, code: 'abc234' }));
 
     expect(loadSession('abc234')?.code).toBe('ABC234');
+  });
+
+  it('нормализует ключ при сохранении и удалении', () => {
+    saveSession({ ...session, code: 'abc234' });
+
+    expect(sessionStorage.getItem('ttt:session:ABC234')).not.toBeNull();
+    expect(loadSession('ABC234')).not.toBeNull();
+
+    clearSession('abc234');
+    expect(sessionStorage.getItem('ttt:session:ABC234')).toBeNull();
+  });
+
+  it('не сохраняет сессию с невалидным кодом', () => {
+    saveSession({ ...session, code: 'ABC' });
+    saveSession({ ...session, code: 'ABC01O' });
+
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('не читает сессию, если код в хранилище не совпадает с запрошенным', () => {
+    sessionStorage.setItem('ttt:session:ABC234', JSON.stringify({ ...session, code: 'XYZ789' }));
+
+    expect(loadSession('ABC234')).toBeNull();
+  });
+
+  it('проверяет формат кода комнаты', () => {
+    expect(isGameCode('ABC234')).toBe(true);
+    expect(isGameCode('abc234')).toBe(false);
+    expect(isGameCode('ABC23')).toBe(false);
+    expect(isGameCode('ABC23O')).toBe(false);
   });
 
   it('хранит имя отдельно от сессии', () => {

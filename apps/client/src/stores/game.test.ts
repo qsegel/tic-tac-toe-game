@@ -166,6 +166,8 @@ describe('game store', () => {
     store.play(0);
     store.play(1);
     expect(socket.sent).toHaveLength(1);
+    expect(store.pendingMove).toBe(true);
+    expect(store.canPlay).toBe(false);
 
     socket.receive({
       type: 'state',
@@ -173,6 +175,26 @@ describe('game store', () => {
       you: 'X',
     });
     expect(store.game?.version).toBe(2);
+    expect(store.pendingMove).toBe(false);
+  });
+
+  it('разблокирует доску, если сервер не ответил на ход', async () => {
+    vi.useFakeTimers();
+    const store = useGameStore();
+    await store.create();
+    const socket = FakeSocket.instances[0]!;
+    socket.open();
+    socket.receive({ type: 'state', game: makeGame(), you: 'X' });
+
+    store.play(4);
+    expect(store.pendingMove).toBe(true);
+    expect(store.error).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    expect(store.pendingMove).toBe(false);
+    expect(store.canPlay).toBe(true);
+    expect(store.error).toContain('не ответил');
   });
 
   it('не отправляет ход, когда сейчас очередь соперника', async () => {
@@ -251,6 +273,64 @@ describe('game store', () => {
     store.disconnect();
   });
 
+  it('не отправляет повторный голос за рематч до ответа сервера', async () => {
+    vi.useFakeTimers();
+    const store = useGameStore();
+    await store.create();
+    const socket = FakeSocket.instances[0]!;
+    socket.open();
+    socket.receive({
+      type: 'state',
+      game: makeGame({ status: 'finished', winner: 'X' }),
+      you: 'X',
+    });
+
+    expect(store.voteRematch()).toBe(true);
+    expect(store.pendingRematch).toBe(true);
+    expect(store.voteRematch()).toBe(false);
+    expect(socket.sentMessages().filter((message) => message.type === 'rematch')).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    expect(store.pendingRematch).toBe(false);
+    expect(store.error).toContain('рематча');
+    expect(store.voteRematch()).toBe(true);
+  });
+
+  it('сбрасывает запрос рематча после ответа сервера', async () => {
+    const store = useGameStore();
+    await store.create();
+    const socket = FakeSocket.instances[0]!;
+    socket.open();
+    socket.receive({
+      type: 'state',
+      game: makeGame({ status: 'finished', winner: 'X' }),
+      you: 'X',
+    });
+
+    expect(store.voteRematch()).toBe(true);
+    socket.receive({
+      type: 'state',
+      game: makeGame({ status: 'finished', winner: 'X', rematchVotes: ['X'] }),
+      you: 'X',
+    });
+
+    expect(store.pendingRematch).toBe(false);
+    expect(store.myRematchVote).toBe(true);
+  });
+
+  it('отправляет ping при возврате во вкладку', async () => {
+    const store = useGameStore();
+    await store.create();
+    const socket = FakeSocket.instances[0]!;
+    socket.open();
+    socket.sent.length = 0;
+
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(socket.sentMessages()).toContainEqual({ type: 'ping' });
+  });
+
   it('показывает ошибку сервера', async () => {
     const store = useGameStore();
     await store.create();
@@ -292,8 +372,12 @@ describe('game store', () => {
     expect(store.game).toBeNull();
     expect(store.you).toBeNull();
     expect(store.connection).toBe('closed');
+    expect(store.sessionExpired).toBe(true);
     expect(sessionStorage.getItem(SESSION_KEY)).toBeNull();
     expect(store.error).toContain('Сессия');
+
+    store.enter('ABC234');
+    expect(store.sessionExpired).toBe(false);
   });
 
   it('не переподключается, если игру открыли в другой вкладке', async () => {

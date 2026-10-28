@@ -98,4 +98,55 @@ describe('ProfileView', () => {
     expect(wrapper.find('.history__delta').text()).toBe('+16');
     expect(wrapper.text()).toContain('против Боб');
   });
+
+  it('не дублирует партии при сдвиге offset между страницами', async () => {
+    const match = (id: number, code: string) => ({
+      id,
+      code,
+      round: 1,
+      status: 'finished',
+      winner: 'X',
+      myMark: 'X',
+      result: 'win',
+      opponentName: 'Боб',
+      rated: true,
+      ratingDelta: 16,
+      ratingAfter: 1016,
+      finishedAt: 1_700_000_000_000,
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/api/me/stats')) {
+          return jsonResponse({
+            wins: 2,
+            losses: 0,
+            draws: 0,
+            abandoned: 0,
+            played: 2,
+            rating: 1032,
+            bestRating: 1032,
+            ratedGames: 2,
+            rank: 1,
+          });
+        }
+
+        const offset = Number(new URL(url, 'http://localhost').searchParams.get('offset'));
+        const matches = offset === 0 ? [match(1, 'ABC234')] : [match(1, 'ABC234'), match(2, 'XYZ789')];
+        return jsonResponse({ matches, total: 2, hasMore: offset === 0 });
+      }),
+    );
+
+    const router = createTestRouter();
+    await router.push('/profile');
+    const wrapper = mount(ProfileView, { global: { plugins: [authenticatedPinia(), router] } });
+    await flushPromises();
+
+    await wrapper.findAll('button').find((button) => button.text().includes('Показать ещё'))!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findAll('.history__item')).toHaveLength(2);
+    expect(wrapper.text()).toContain('XYZ789');
+  });
 });

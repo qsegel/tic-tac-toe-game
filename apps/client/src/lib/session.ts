@@ -1,3 +1,4 @@
+import { CODE_ALPHABET, CODE_LENGTH } from '@ttt/shared';
 import type { GameMode, Mark } from '@ttt/shared';
 
 export interface Session {
@@ -40,28 +41,45 @@ function isMark(value: unknown): value is Mark {
   return value === 'X' || value === 'O';
 }
 
+/** Код комнаты в хранилище всегда в верхнем регистре. */
+export function normalizeCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
+/** Проверка формата кода до запроса на сервер. */
+export function isGameCode(code: string): boolean {
+  if (code.length !== CODE_LENGTH) return false;
+  return [...code].every((char) => CODE_ALPHABET.includes(char));
+}
+
 export function saveSession(session: Session): void {
+  const code = normalizeCode(session.code);
+  if (!isGameCode(code)) return;
   try {
-    sessionStorageSafe()?.setItem(SESSION_PREFIX + session.code, JSON.stringify(session));
+    sessionStorageSafe()?.setItem(SESSION_PREFIX + code, JSON.stringify({ ...session, code }));
   } catch {
     // приватный режим / переполнение — переподключение просто не сработает
   }
 }
 
 export function loadSession(code: string): Session | null {
+  const key = normalizeCode(code);
+  if (!isGameCode(key)) return null;
+
   try {
-    const raw = sessionStorageSafe()?.getItem(SESSION_PREFIX + code.toUpperCase());
+    const raw = sessionStorageSafe()?.getItem(SESSION_PREFIX + key);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as Partial<Session> | null;
     if (!parsed || typeof parsed !== 'object') return null;
     if (!isFilledString(parsed.gameId) || !isFilledString(parsed.playerId)) return null;
     if (!isFilledString(parsed.code)) return null;
+    if (normalizeCode(parsed.code) !== key) return null;
     if (!isMark(parsed.mark)) return null;
 
     return {
       gameId: parsed.gameId,
-      code: parsed.code.toUpperCase(),
+      code: key,
       playerId: parsed.playerId,
       mark: parsed.mark,
       // Старые сессии в sessionStorage не знают о режиме — считаем их обычными.
@@ -73,8 +91,10 @@ export function loadSession(code: string): Session | null {
 }
 
 export function clearSession(code: string): void {
+  const key = normalizeCode(code);
+  if (!isGameCode(key)) return;
   try {
-    sessionStorageSafe()?.removeItem(SESSION_PREFIX + code.toUpperCase());
+    sessionStorageSafe()?.removeItem(SESSION_PREFIX + key);
   } catch {
     // ignore
   }

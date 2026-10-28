@@ -79,7 +79,15 @@ async function loadMore(): Promise<void> {
   error.value = null;
   try {
     const next = await fetchMatches(PAGE_SIZE, matches.value.length);
-    matches.value = [...matches.value, ...next.matches];
+    // Между страницами могла добавиться партия: offset сдвигается и строки повторяются.
+    const seen = new Set(matches.value.map((match) => match.id));
+    const merged = [...matches.value];
+    for (const match of next.matches) {
+      if (seen.has(match.id)) continue;
+      seen.add(match.id);
+      merged.push(match);
+    }
+    matches.value = merged;
     total.value = next.total;
     hasMore.value = next.hasMore;
   } catch (cause) {
@@ -94,7 +102,11 @@ async function loadMore(): Promise<void> {
 async function handleAuthError(cause: unknown): Promise<boolean> {
   if (!(cause instanceof ApiError) || cause.status !== 401) return false;
   auth.clear();
-  await router.replace({ name: 'auth', query: { redirect: '/profile' } });
+  auth.setError('Сессия истекла — войдите снова');
+  await router.replace({
+    name: 'auth',
+    query: { redirect: router.currentRoute.value.fullPath },
+  });
   return true;
 }
 
@@ -147,7 +159,10 @@ function formatDate(timestamp: number): string {
       <p class="muted">
         Гостевые партии не сохраняются. Создайте аккаунт, чтобы видеть результаты и статистику.
       </p>
-      <UiButton block @click="router.push({ name: 'auth', query: { mode: 'register' } })">
+      <UiButton
+        block
+        @click="router.push({ name: 'auth', query: { mode: 'register', redirect: '/profile' } })"
+      >
         Зарегистрироваться
       </UiButton>
     </UiCard>

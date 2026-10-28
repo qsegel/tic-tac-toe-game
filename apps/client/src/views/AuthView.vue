@@ -47,6 +47,7 @@ function switchMode(next: Mode): void {
 }
 
 async function submit(): Promise<void> {
+  if (busy.value) return;
   localError.value = null;
   auth.setError(null);
 
@@ -80,11 +81,11 @@ async function submit(): Promise<void> {
 
   try {
     if (mode.value === 'guest') {
-      saveName(cleanName);
       await auth.loginAsGuest(cleanName);
-    } else if (mode.value === 'register') {
       saveName(cleanName);
+    } else if (mode.value === 'register') {
       await auth.register({ email: cleanEmail, password: password.value, name: cleanName });
+      saveName(cleanName);
     } else {
       await auth.login(cleanEmail, password.value);
     }
@@ -108,13 +109,12 @@ async function submit(): Promise<void> {
     </section>
 
     <UiCard>
-      <div class="auth-tabs" role="tablist" aria-label="Способ входа">
+      <div class="auth-tabs" role="group" aria-label="Способ входа">
         <button
           type="button"
           class="auth-tabs__item"
           :class="{ 'auth-tabs__item--active': mode === 'login' }"
-          role="tab"
-          :aria-selected="mode === 'login'"
+          :aria-pressed="mode === 'login'"
           @click="switchMode('login')"
         >
           Вход
@@ -123,8 +123,7 @@ async function submit(): Promise<void> {
           type="button"
           class="auth-tabs__item"
           :class="{ 'auth-tabs__item--active': mode === 'register' }"
-          role="tab"
-          :aria-selected="mode === 'register'"
+          :aria-pressed="mode === 'register'"
           @click="switchMode('register')"
         >
           Регистрация
@@ -133,15 +132,14 @@ async function submit(): Promise<void> {
           type="button"
           class="auth-tabs__item"
           :class="{ 'auth-tabs__item--active': mode === 'guest' }"
-          role="tab"
-          :aria-selected="mode === 'guest'"
+          :aria-pressed="mode === 'guest'"
           @click="switchMode('guest')"
         >
           Гостем
         </button>
       </div>
 
-      <form class="auth-form" @submit.prevent="submit">
+      <form class="auth-form" novalidate @submit.prevent="submit">
         <UiInput
           v-if="mode !== 'login'"
           v-model="name"
