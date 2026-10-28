@@ -1,0 +1,24 @@
+{
+  "name": "tic-tac-toe-online",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w @ttt/server\" \"npm run dev -w @ttt/client\"",
+    "build": "npm run build -w @ttt/client",
+    "start": "npm run start -w @ttt/server",
+    "test": "npm run test -w @ttt/shared && npm run test -w @ttt/server && npm run test -w @ttt/client",
+    "typecheck": "npm run typecheck -w @ttt/shared && npm run typecheck -w @ttt/server && npm run typecheck -w @ttt/client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}

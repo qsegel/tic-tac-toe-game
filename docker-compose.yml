@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: '3000'
+      # Клиент и API на одном origin. Добавьте свой домен в прод.
+      CLIENT_ORIGIN: 'http://localhost:3000,http://127.0.0.1:3000'
+    restart: unless-stopped

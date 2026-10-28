@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Крестики-нолики">
+  <rect width="64" height="64" rx="14" fill="#0b1020" />
+  <path d="M12 12l14 14M26 12L12 26" stroke="#5ee7ff" stroke-width="6" stroke-linecap="round" />
+  <circle cx="44" cy="44" r="11" fill="none" stroke="#ff7eb6" stroke-width="6" />
+</svg>

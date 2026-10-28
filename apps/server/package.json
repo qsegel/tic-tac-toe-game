@@ -1,0 +1,27 @@
+{
+  "name": "@ttt/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/rate-limit": "^10.2.2",
+    "@fastify/static": "^10.1.8",
+    "@fastify/websocket": "^11.0.2",
+    "@ttt/shared": "*",
+    "fastify": "^5.2.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "@types/ws": "^8.5.14",
+    "typescript": "^5.7.3",
+    "ws": "^8.18.0"
+  }
+}
