@@ -29,6 +29,11 @@ export interface AttachResult {
   mark: Mark;
 }
 
+export interface JoinResult extends CreateResult {
+  /** `true` — игрок только что занял второй слот; `false` — уже был в комнате. */
+  created: boolean;
+}
+
 export interface RoomRegistryOptions {
   now?: () => number;
   graceMs?: number;
@@ -59,6 +64,7 @@ export class RoomRegistry {
   private readonly abandonTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly listeners = new Set<(game: Game) => void>();
+  private disposed = false;
 
   private readonly now: () => number;
   private readonly graceMs: number;
@@ -132,7 +138,7 @@ export class RoomRegistry {
     return { game, playerId: host.playerId, mark: 'X' };
   }
 
-  join(code: string, playerId: string, name: string): CreateResult {
+  join(code: string, playerId: string, name: string): JoinResult {
     const game = this.getByCode(code);
     if (!game) {
       throw new GameError('NOT_FOUND', 'Комната не найдена');
@@ -142,7 +148,7 @@ export class RoomRegistry {
     // не должен создавать второго участника.
     const existing = markOf(game, playerId);
     if (existing) {
-      return { game, playerId, mark: existing };
+      return { game, playerId, mark: existing, created: false };
     }
 
     const guest = makeSlot({ playerId, name });
@@ -153,7 +159,7 @@ export class RoomRegistry {
     this.scheduleForDisconnected(next);
     this.emit(next);
 
-    return { game: next, playerId: guest.playerId, mark: 'O' };
+    return { game: next, playerId: guest.playerId, mark: 'O', created: true };
   }
 
   move(gameId: string, playerId: string, index: number, version: number): Game {
@@ -228,6 +234,7 @@ export class RoomRegistry {
 
   /** Сокет закрылся: даём время на переподключение. */
   detach(gameId: string, playerId: string): void {
+    if (this.disposed) return;
     const game = this.games.get(gameId);
     if (!game) return;
 
@@ -301,6 +308,7 @@ export class RoomRegistry {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const timer of this.abandonTimers.values()) {
       clearTimeout(timer);
     }
@@ -310,11 +318,14 @@ export class RoomRegistry {
     }
     this.botTimers.clear();
     this.listeners.clear();
+    this.games.clear();
+    this.codes.clear();
   }
 
   // ── внутреннее ────────────────────────────────────────────────────────────
 
   private emit(game: Game): void {
+    if (this.disposed) return;
     for (const listener of this.listeners) {
       listener(game);
     }
@@ -349,6 +360,7 @@ export class RoomRegistry {
   }
 
   private scheduleAbandon(gameId: string, playerId: string): void {
+    if (this.disposed) return;
     const key = timerKey(gameId, playerId);
     this.clearAbandonTimer(gameId, playerId);
 
@@ -370,6 +382,7 @@ export class RoomRegistry {
   }
 
   private abandon(gameId: string, playerId: string, force: boolean): void {
+    if (this.disposed) return;
     const game = this.games.get(gameId);
     if (!game) return;
 
@@ -413,6 +426,7 @@ export class RoomRegistry {
    * состояние: за время «раздумий» партию могли бросить или перезапустить.
    */
   private maybeScheduleBot(game: Game): void {
+    if (this.disposed) return;
     this.clearBotTimer(game.id);
     if (game.mode !== 'bot' || !game.botPlayerId) return;
     if (game.status !== 'playing') return;

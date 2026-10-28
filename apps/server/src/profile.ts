@@ -8,7 +8,7 @@ const matchesQuerySchema = {
   additionalProperties: false,
   properties: {
     limit: { type: 'integer', minimum: 1, maximum: 50 },
-    offset: { type: 'integer', minimum: 0 },
+    offset: { type: 'integer', minimum: 0, maximum: 100_000 },
   },
 } as const;
 
@@ -17,7 +17,7 @@ const leaderboardQuerySchema = {
   additionalProperties: false,
   properties: {
     limit: { type: 'integer', minimum: 1, maximum: 100 },
-    offset: { type: 'integer', minimum: 0 },
+    offset: { type: 'integer', minimum: 0, maximum: 100_000 },
   },
 } as const;
 

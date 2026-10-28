@@ -4,6 +4,8 @@ import type { ErrorCode, GameError } from '@ttt/shared';
 /** HTTP-статус для каждого доменного кода ошибки. */
 export const statusByCode: Partial<Record<ErrorCode, number>> = {
   BAD_REQUEST: 400,
+  PAYLOAD_TOO_LARGE: 413,
+  UNSUPPORTED_MEDIA_TYPE: 415,
   INVALID_TOKEN: 401,
   UNAUTHORIZED: 401,
   INVALID_CREDENTIALS: 401,

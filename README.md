@@ -131,10 +131,10 @@ JWT_SECRET="$(openssl rand -hex 32)" npm start
 | `PORT` | `3000` | порт HTTP/WS |
 | `HOST` | `0.0.0.0` | интерфейс |
 | `CLIENT_ORIGIN` | пусто | белый список origin через запятую для CORS, проверки `Origin` у WS и CSRF; пусто = CORS выключен, Origin у WS не проверяется (только для локальной разработки) |
-| `JWT_SECRET` | случайный | секрет подписи JWT. В проде задайте явно (≥ 32 символов), иначе после рестарта сессии инвалидируются |
+| `JWT_SECRET` | — (генерируется) | секрет подписи JWT. В production обязателен (≥ 32 символов, не placeholder), иначе сервер не стартует; без него в dev генерируется случайный секрет и сессии не переживают рестарт |
 | `COOKIE_SECURE` | `false` | всегда ставить cookie с флагом `Secure` (за HTTPS reverse-proxy) |
 | `DATABASE_PATH` | `apps/server/data/ttt.db` | путь к SQLite-базе |
-| `TRUST_PROXY` | `false` | доверять `X-Forwarded-*`; включайте только за reverse-proxy |
+| `TRUST_PROXY` | `false` | доверять `X-Forwarded-*`; включайте только за reverse-proxy, иначе rate limit и `MAX_SOCKETS_PER_IP` будут общими на весь сайт |
 | `MAX_ROOMS` | `10000` | максимум комнат в памяти; при переполнении создание отвечает `503 ROOM_LIMIT` |
 | `MAX_SOCKETS_PER_IP` | `8` | максимум одновременных WS-соединений с одного IP |
 | `BOT_DELAY_MS` | `550` | пауза перед ходом бота (в тестах выставляется меньше) |
@@ -150,7 +150,7 @@ JWT_SECRET="$(openssl rand -hex 32)" npm start
 
 - JWT HS256, claims: `sub`, `role: user | guest`, `iss: ttt`, `aud: ttt-web`, `exp` — 24 часа.
 - Cookie `ttt_session`: `httpOnly`, `SameSite=Lax`, `path=/`, `Max-Age=86400`; `Secure` при `COOKIE_SECURE=true` или HTTPS.
-- Пароли: `scrypt` (`N=16384, r=8, p=1`, 64 байта) + `timingSafeEqual`; одинаковое время ответа для «нет такого email» и «неверный пароль».
+- Пароли: `scrypt` (`N=32768, r=8, p=3`, 64 байта) + `timingSafeEqual`; одинаковое время ответа для «нет такого email» и «неверный пароль».
 - Гость получает `role=guest` и `playerId` вида `guest_…`; аккаунт — `usr_…`.
 - Выход только очищает cookie: JWT остаётся валидным до `exp` (отзыва токенов нет — осознанное упрощение).
 - CSRF: `SameSite=Lax` + проверка `Origin` для `POST/PUT/PATCH/DELETE` на `/api/*`, если задан `CLIENT_ORIGIN`.
@@ -169,7 +169,7 @@ JWT_SECRET="$(openssl rand -hex 32)" npm start
 | `GET` | `/api/auth/me` | — | `200 { user }` |
 | `POST` | `/api/games` | — | `201 { gameId, code, playerId, mark: "X", mode: "pvp" }` |
 | `POST` | `/api/games/bot` | `{ difficulty?: "easy" \| "medium" \| "hard" }` | `201 { gameId, code, playerId, mark: "X", mode: "bot" }` |
-| `POST` | `/api/games/:code/join` | — | `201 { gameId, code, playerId, mark: "O", mode: "pvp" }` |
+| `POST` | `/api/games/:code/join` | — | `201 { gameId, code, playerId, mark: "O", mode: "pvp" }`; повторный заход того же игрока — `200` |
 | `GET` | `/api/games/:code` | — | `200 { game: PublicGame }` |
 | `GET` | `/api/me/stats` | — | `200 { wins, losses, draws, abandoned, played, rating, bestRating, ratedGames, rank }` |
 | `GET` | `/api/me/matches?limit=20&offset=0` | — | `200 { matches, total, hasMore }` |
@@ -184,11 +184,17 @@ JWT_SECRET="$(openssl rand -hex 32)" npm start
 `matches[]`: `{ id, code, round, status, winner, myMark, result, opponentName, rated, ratingDelta, ratingAfter, finishedAt }`.
 `leaderboard.entries[]`: `{ position, name, rating, games, wins, losses, draws, isMe }` —
 без id и email; в таблицу попадают только пользователи с `rated_games > 0`.
+`games` и `wins/losses/draws` в лидерборде считаются **только по рейтинговым**
+партиям, поэтому `games = wins + losses + draws`; партии с гостями и `abandoned`
+в этой строке не учитываются (они видны в `/api/me/stats`).
 
 Ошибки: `{ code, message }`, где `code` — машинный (`UNAUTHORIZED`, `INVALID_CREDENTIALS`,
-`EMAIL_TAKEN`, `ACCOUNT_REQUIRED`, `ROOM_FULL`, `RATE_LIMITED`, …). Ошибки валидации
-Fastify и rate limit также приводятся к этому формату. `playerId` в публичный
-снапшот не попадает.
+`EMAIL_TAKEN`, `ACCOUNT_REQUIRED`, `ROOM_FULL`, `RATE_LIMITED`, `PAYLOAD_TOO_LARGE`,
+`UNSUPPORTED_MEDIA_TYPE`, …). Ошибки валидации Fastify и rate limit также приводятся
+к этому формату. `playerId` в публичный снапшот не попадает.
+
+Все ответы содержат `X-Content-Type-Options: nosniff`, `Referrer-Policy`,
+`X-Frame-Options: DENY`; при HTTPS (или `COOKIE_SECURE=true`) — ещё и HSTS.
 
 ## История и статистика
 
@@ -264,22 +270,23 @@ Fastify и rate limit также приводятся к этому формат
 npm test
 ```
 
-- `packages/shared` — 40 тестов: все выигрышные линии, ничья, очередность, занятые клетки, версии, рематч со сменой меток и раунда, санитайзинг имён, отсутствие утечки `playerId`; ходы бота всех сложностей (включая перебор «человек не может выиграть у hard») и математика Эло.
-- `apps/server` — 50 тестов: полная партия, auth (регистрация/вход/гость/logout/CSRF), история (победа/ничья/abandoned/рематчи/гости/пагинация), рейтинг и лидерборд, партии с ботом (создание, рематч, гость, выход), `ROOM_FULL`, `ROOM_LIMIT`, ошибки ходов, отмена по grace-таймеру, уход обоих, реконнект, cookie/WS-авторизация, `Origin`, лимиты HTTP/WS, sweep.
+- `packages/shared` — 41 тест: все выигрышные линии, ничья, очередность, занятые клетки, версии, рематч со сменой меток и раунда, санитайзинг имён (включая эмодзи и bidi), отсутствие утечки `playerId`; ходы бота всех сложностей (включая перебор «человек не может выиграть у hard») и математика Эло.
+- `apps/server` — 60 тестов: полная партия, auth (регистрация/вход/гость/logout/CSRF/cookie/JWT), хэширование паролей, история (победа/ничья/abandoned/рематчи/гости/пагинация), рейтинг и лидерборд (только рейтинговые W/L/D), партии с ботом (создание, рематч, гость, выход), `ROOM_FULL`, `ROOM_LIMIT`, ошибки ходов, отмена по grace-таймеру, уход обоих, реконнект, cookie/WS-авторизация, `Origin`, лимиты HTTP/WS (413), security-заголовки, sweep.
 - `apps/client` — 69 тестов: тексты статусов, компоненты UI и доски, Pinia-сторы auth и game (создание игры и партии с ботом, снапшоты, защита от двойного клика, смена меток, восстановление сессии, 401), профиль с рейтингом и лидерборд.
 
 ## Docker
 
 ```bash
-docker compose up --build
+JWT_SECRET="$(openssl rand -hex 32)" docker compose up --build
 # http://localhost:3000
 ```
 
 `Dockerfile` — multi-stage: сборка клиента → рантайм с прод-зависимостями.
 Контейнер работает от пользователя `node`, у сервиса есть `HEALTHCHECK` на `/health`.
 SQLite лежит в named volume `ttt-data` (`/app/apps/server/data`), поэтому история
-переживает перезапуск контейнера. В `docker-compose.yml` замените `JWT_SECRET`
-на свой и выставьте `COOKIE_SECURE=true`, если работаете через HTTPS.
+переживает перезапуск контейнера. `JWT_SECRET` в `docker-compose.yml` обязателен:
+без него compose не стартует, а сервер в production не примет пустой/короткий/примерный
+секрет. Выставьте `COOKIE_SECURE=true`, если работаете через HTTPS.
 
 ## Ограничения и что дальше
 
@@ -289,6 +296,7 @@ SQLite лежит в named volume `ttt-data` (`/app/apps/server/data`), поэт
 - JWT не отзывается при logout и не имеет refresh-токенов;
 - нет подтверждения email, восстановления пароля, чата, зрителей и таймера на ход;
 - рейтинг Эло считает только партии «аккаунт против аккаунта»; гости, бот и брошенные партии в рейтинг не входят;
+- если второй игрок вошёл в комнату, но так и не открыл сокет, оставшийся получает `win` в статистике (рейтинг не меняется). Это осознанное поведение grace-периода: партия не должна зависать, но статистические победы в таких партиях теоретически можно накрутить;
 - горизонтальное масштабирование требует sticky sessions и общего хранилища (Redis) — `RoomRegistry` специально повторяет интерфейс, который легко заменить адаптером;
 - `node:sqlite` на текущих Node печатает `ExperimentalWarning` — это ожидаемо;
 - нет ESLint/Prettier и e2e на Playwright — при желании добавляются без изменения архитектуры.

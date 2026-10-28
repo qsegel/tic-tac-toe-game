@@ -171,3 +171,44 @@ test('лидерборд: сортировка, пагинация, me и иск
   assert.equal(anonymous.me, null);
   assert.ok(anonymous.entries.every((entry) => entry.isMe === false));
 });
+
+test('лидерборд: W/L/D только по рейтинговым партиям, stats — по всем', (t) => {
+  const { history } = withDb(t);
+  history.record(xWins(makePlayingGame()));
+
+  const host = makeSlot({ playerId: X_ID, name: 'Аня' });
+  const guest = makeSlot({ playerId: 'guest_g', name: 'Гость' });
+  const guestGame = joinGame(
+    createGame({ id: 'game-guest', code: 'ABC999', host, now: 2_000 }),
+    guest,
+    2_001,
+  );
+  history.record(xWins(guestGame));
+
+  const me = history.leaderboard(10, 0, X_ID).entries.find((entry) => entry.isMe);
+  assert.equal(me?.games, 1);
+  assert.equal(me?.wins, 1);
+  assert.equal(me?.losses, 0);
+  assert.equal(me?.draws, 0);
+
+  // Профиль по-прежнему показывает все партии, включая игру с гостем.
+  assert.equal(history.stats(X_ID).wins, 2);
+});
+
+test('лидерборд: при полном равенстве порядок детерминирован по id', (t) => {
+  const { db, history } = withDb(t);
+  history.record(draw(makePlayingGame()));
+  db.prepare('UPDATE users SET created_at = 5').run();
+
+  // id 'usr_o' < 'usr_x', поэтому при равных рейтинге/играх/времени первым идёт Боб.
+  const page = history.leaderboard(10, 0, null);
+  assert.deepEqual(
+    page.entries.map((entry) => entry.name),
+    ['Боб', 'Аня'],
+  );
+  assert.deepEqual(
+    page.entries.map((entry) => entry.position),
+    [1, 2],
+  );
+  assert.equal(page.me, null);
+});

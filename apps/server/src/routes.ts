@@ -71,7 +71,8 @@ export function registerRoutes(app: FastifyInstance, registry: RoomRegistry): vo
     },
     async (request, reply) => {
       const result = registry.join(request.params.code, request.authUser.id, request.authUser.name);
-      return reply.code(201).send(sessionBody(result));
+      // Повторный заход того же игрока — не создание нового слота.
+      return reply.code(result.created ? 201 : 200).send(sessionBody(result));
     },
   );
 

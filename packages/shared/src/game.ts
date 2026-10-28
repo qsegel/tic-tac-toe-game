@@ -217,16 +217,23 @@ export function startRematch(game: Game, playerId: string, now: number): { game:
   return { game: next, started: true };
 }
 
+/**
+ * Управляющие символы, zero-width и bidi-override: их не должно быть в имени,
+ * иначе ник в лидерборде/комнате может визуально «ломать» интерфейс.
+ */
+const NAME_FORBIDDEN = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g;
+
 /** Имя: обрезаем, схлопываем пробелы, убираем управляющие символы. */
 export function sanitizeName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const clean = raw
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(NAME_FORBIDDEN, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, NAME_MAX_LENGTH)
     .trim();
-  return clean.length > 0 ? clean : null;
+  // Режем по code points, а не по UTF-16 code units: иначе эмодзи на границе
+  // обрезается до одиночного суррогата и ломает JSON/рендер.
+  const truncated = [...clean].slice(0, NAME_MAX_LENGTH).join('').trim();
+  return truncated.length > 0 ? truncated : null;
 }
 
 export function toPublicGame(game: Game): PublicGame {

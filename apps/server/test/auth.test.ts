@@ -10,7 +10,9 @@ interface Harness {
   baseUrl: string;
 }
 
-async function startServer(options: { clientOrigins?: string[] } = {}): Promise<Harness> {
+async function startServer(
+  options: { clientOrigins?: string[]; cookieSecure?: boolean } = {},
+): Promise<Harness> {
   const app = await buildApp({
     logger: false,
     databasePath: ':memory:',
@@ -215,4 +217,40 @@ test('CSRF: небезопасный запрос с чужим Origin откл�
     headers: { cookie, origin: 'http://allowed.test' },
   });
   assert.equal(allowed.status, 201);
+});
+
+test('COOKIE_SECURE=true выставляет флаг Secure', async (t) => {
+  const harness = await startServer({ cookieSecure: true });
+  t.after(() => harness.app.close());
+
+  const guest = await post(`${harness.baseUrl}/api/auth/guest`, { name: 'Гость' });
+  assert.equal(guest.status, 200);
+  assert.match(guest.setCookie ?? '', /;\s*Secure/i);
+});
+
+test('JWT: истёкший токен, чужой issuer и audience отклоняются', async (t) => {
+  const harness = await startServer();
+  t.after(() => harness.app.close());
+
+  const registered = await post(`${harness.baseUrl}/api/auth/register`, {
+    email: 'anya@example.com',
+    password: 'password123',
+    name: 'Аня',
+  });
+  const user = (registered.body as unknown as AuthResponse).user;
+
+  const tokens = [
+    harness.app.jwt.sign({ sub: user.id, role: 'user' }, { expiresIn: -1 }),
+    harness.app.jwt.sign({ sub: user.id, role: 'user' }, { iss: 'evil' }),
+    harness.app.jwt.sign({ sub: user.id, role: 'user' }, { aud: 'evil' }),
+  ];
+
+  for (const token of tokens) {
+    const response = await fetch(`${harness.baseUrl}/api/auth/me`, {
+      headers: { cookie: `ttt_session=${token}` },
+    });
+    assert.equal(response.status, 401);
+    const body = (await response.json()) as Record<string, unknown>;
+    assert.equal(body.code, 'UNAUTHORIZED');
+  }
 });

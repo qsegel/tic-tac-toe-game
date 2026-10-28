@@ -37,7 +37,7 @@ If UI flows changed, also verify the relevant scenario manually.
 ### Game
 
 - **The server is the single source of truth.** The client does not compute the winner or decide whose turn it is.
-- **`version`** increments on every change; a stale move is rejected (`STALE_STATE`).
+- **`version`** increments on every change of the game state (board, turn, status, round); a stale move is rejected (`STALE_STATE`). Connectivity flags (`connected`/`disconnectedAt`) do **not** bump it, otherwise an opponent's reconnect would invalidate an in-flight move.
 - **`round`** starts at 1 and increments on every rematch.
 - **Rematch:** both players vote, the board is cleared, marks are swapped (`X ↔ O`), and `X` moves first again.
 - **`abandoned`:** the player who stays connected gets the win, the player who left gets `abandoned`. If both left, there is no winner.
@@ -51,7 +51,7 @@ If UI flows changed, also verify the relevant scenario manually.
 - Only `finished` games with **two `usr_…` players** are rated. `abandoned`, guest games, and bot games never change rating.
 - Rating writes and match insertion happen in the same `BEGIN IMMEDIATE` transaction; `UNIQUE (game_id, round)` makes recording idempotent.
 - `match_players` stores `rating_before` / `rating_after`; `users` stores `rating`, `best_rating`, `rated_games`.
-- Leaderboard includes only users with `rated_games > 0` and never exposes user IDs or emails. It is available to guests.
+- Leaderboard includes only users with `rated_games > 0` and never exposes user IDs or emails. It is available to guests. Its `games`/`wins`/`losses`/`draws` count **rated matches only**, so `games = wins + losses + draws`; `/api/me/stats` remains the all-games view.
 - Existing matches stay unrated; do not backfill.
 
 ### Accounts and sessions

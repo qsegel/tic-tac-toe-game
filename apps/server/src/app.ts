@@ -15,7 +15,7 @@ import { AuthService, SESSION_COOKIE } from './auth/session.js';
 import { UserStore } from './auth/users.js';
 import { openDatabase } from './db.js';
 import { replyWithError } from './errors.js';
-import { MatchHistory } from './history.js';
+import { MatchHistory, isSqliteBusy } from './history.js';
 import { registerProfileRoutes } from './profile.js';
 import { RoomRegistry } from './rooms.js';
 import { registerRoutes } from './routes.js';
@@ -94,11 +94,6 @@ export async function buildApp(options: BuildOptions = {}): Promise<FastifyInsta
   });
   await app.register(rateLimit, {
     global: false,
-    errorResponseBuilder: (_request, context) => ({
-      code: 'RATE_LIMITED',
-      message: `Слишком много запросов, попробуйте через ${Math.max(1, Math.ceil(context.ttl / 1000))} с`,
-      statusCode: 429,
-    }),
   });
   await app.register(websocket, {
     options: { maxPayload: MAX_MESSAGE_BYTES },
@@ -121,12 +116,28 @@ export async function buildApp(options: BuildOptions = {}): Promise<FastifyInsta
 
   // История пишется до рассылки снапшота: клиент, увидевший финал,
   // уже может открыть профиль и увидеть результат.
+  let closing = false;
+
   registry.subscribe((game) => {
-    try {
-      history.record(game);
-    } catch (error) {
-      app.log.error({ err: error }, 'failed to record match');
-    }
+    const tryRecord = (attempt: number): void => {
+      if (closing) return;
+      try {
+        history.record(game);
+      } catch (error) {
+        // SQLite может быть кратковременно занят (WAL, бэкап): повторяем,
+        // иначе abandoned-раунд больше никогда не будет записан.
+        if (!closing && attempt < 2 && isSqliteBusy(error)) {
+          const timer = setTimeout(() => tryRecord(attempt + 1), 100 * (attempt + 1));
+          timer.unref?.();
+          return;
+        }
+        app.log.error(
+          { err: error, gameId: game.id, round: game.round },
+          'failed to record match',
+        );
+      }
+    };
+    tryRecord(0);
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -140,6 +151,12 @@ export async function buildApp(options: BuildOptions = {}): Promise<FastifyInsta
     }
 
     const status = failure.statusCode ?? 500;
+    if (status === 413) {
+      return reply.code(413).send({ code: 'PAYLOAD_TOO_LARGE', message: 'Слишком большой запрос' });
+    }
+    if (status === 415) {
+      return reply.code(415).send({ code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Неподдерживаемый тип содержимого' });
+    }
     if (status === 429) {
       return reply.code(429).send({ code: 'RATE_LIMITED', message: 'Слишком много запросов, попробуйте позже' });
     }
@@ -166,6 +183,12 @@ export async function buildApp(options: BuildOptions = {}): Promise<FastifyInsta
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('referrer-policy', 'same-origin');
+    reply.header('x-frame-options', 'DENY');
+    if (request.protocol === 'https' || options.cookieSecure === true) {
+      reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    }
     if (isApiPath(pathnameOf(request.raw.url))) {
       reply.header('cache-control', 'no-store');
     }
@@ -176,6 +199,7 @@ export async function buildApp(options: BuildOptions = {}): Promise<FastifyInsta
   sweepTimer.unref?.();
 
   app.addHook('onClose', async () => {
+    closing = true;
     clearInterval(sweepTimer);
     registry.dispose();
     db.close();
@@ -183,6 +207,10 @@ export async function buildApp(options: BuildOptions = {}): Promise<FastifyInsta
 
   const staticDir = options.staticDir === undefined ? defaultStaticDir() : options.staticDir;
   const serveStatic = staticDir !== null && existsSync(staticDir);
+
+  if (staticDir && !serveStatic) {
+    app.log.warn({ staticDir }, 'static directory not found; serving API only');
+  }
 
   if (serveStatic && staticDir) {
     await app.register(fastifyStatic, { root: staticDir, prefix: '/' });

@@ -48,17 +48,23 @@ export interface AuthResult {
   token: string;
 }
 
-export class AuthService {
-  private readonly dummyHash: Promise<string>;
+/**
+ * Dummy-хэш для выравнивания времени логина. Считаем один раз на процесс:
+ * иначе каждый тестовый `buildApp` платит за scrypt при старте.
+ */
+let dummyHashPromise: Promise<string> | null = null;
 
+function dummyHash(): Promise<string> {
+  dummyHashPromise ??= hashPassword('dummy-password-for-timing');
+  return dummyHashPromise;
+}
+
+export class AuthService {
   constructor(
     private readonly app: FastifyInstance,
     private readonly users: UserStore,
     private readonly options: AuthServiceOptions = {},
-  ) {
-    // Одинаковое время ответа для «нет такого email» и «неверный пароль».
-    this.dummyHash = hashPassword('dummy-password-for-timing');
-  }
+  ) {}
 
   async register(input: { email: string; password: string; name: string }): Promise<AuthResult> {
     const email = normalizeEmail(input.email);
@@ -89,7 +95,7 @@ export class AuthService {
 
   async login(input: { email: string; password: string }): Promise<AuthResult> {
     const stored = this.users.findByEmail(normalizeEmail(input.email));
-    const expected = stored?.passwordHash ?? (await this.dummyHash);
+    const expected = stored?.passwordHash ?? (await dummyHash());
     const valid = await verifyPassword(input.password, expected);
     if (!stored || !valid) {
       throw new GameError('INVALID_CREDENTIALS', 'Неверный email или пароль');

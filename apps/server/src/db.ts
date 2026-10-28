@@ -23,8 +23,15 @@ export function openDatabase(path: string): DatabaseSync {
 }
 
 function migrate(db: DatabaseSync): void {
+  const SCHEMA_VERSION = 2;
   const row = db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined;
   const version = Number(row?.user_version ?? 0);
+
+  if (version > SCHEMA_VERSION) {
+    throw new Error(
+      `База данных создана более новой версией приложения (schema ${version} > ${SCHEMA_VERSION}). Обновите сервер.`,
+    );
+  }
 
   if (version < 1) {
     db.exec(`

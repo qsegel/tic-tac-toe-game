@@ -649,3 +649,42 @@ test('sweep удаляет комнату, когда все отключили�
 
   await waitForStatus(harness.baseUrl, host.code, hostUser.cookie, 404, 1_500);
 });
+
+test('повторный join того же игрока отвечает 200 и той же меткой', async (t) => {
+  const harness = await startServer();
+  t.after(() => harness.app.close());
+
+  const { host, guestUser } = await createPair(harness);
+  const again = await postEmpty(`${harness.baseUrl}/api/games/${host.code}/join`, guestUser.cookie);
+  assert.equal(again.status, 200);
+  assert.equal(again.body.mark, 'O');
+});
+
+test('слишком большое тело → 413 PAYLOAD_TOO_LARGE', async (t) => {
+  const harness = await startServer();
+  t.after(() => harness.app.close());
+
+  const response = await fetch(`${harness.baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: 'big@example.com',
+      password: 'password123',
+      name: 'x'.repeat(9_000),
+    }),
+  });
+  assert.equal(response.status, 413);
+  const body = (await response.json()) as Record<string, unknown>;
+  assert.equal(body.code, 'PAYLOAD_TOO_LARGE');
+});
+
+test('security-заголовки выставляются на всех ответах', async (t) => {
+  const harness = await startServer();
+  t.after(() => harness.app.close());
+
+  const response = await fetch(`${harness.baseUrl}/health`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(response.headers.get('referrer-policy'), 'same-origin');
+  assert.equal(response.headers.get('x-frame-options'), 'DENY');
+});

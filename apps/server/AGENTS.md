@@ -32,7 +32,8 @@ Files: `src/auth/passwords.ts`, `users.ts`, `session.ts`, `routes.ts`.
 
 - Cookie `ttt_session`: `httpOnly`, `SameSite=Lax`, `path=/`, 24 hours; `Secure` when `COOKIE_SECURE=true` or over HTTPS.
 - JWT: HS256, claims `sub`, `role`, `iss: ttt`, `aud: ttt-web`, `exp`.
-- Passwords: scrypt (`N=16384, r=8, p=1`, 64 bytes) + `timingSafeEqual`.
+- Passwords: scrypt (`N=32768, r=8, p=3`, 64 bytes) + `timingSafeEqual`; the dummy hash for timing is cached once per process.
+- In production `JWT_SECRET` is mandatory (≥ 32 chars, not a placeholder) — the process refuses to start otherwise; in dev a random secret is generated.
 - `AuthService.authenticateRequest` for HTTP; `authenticateToken` for WebSocket.
 - A guest gets `guest_…`, an account gets `usr_…`; there is no separate player token.
 - Rate limits: registration 5/min, login 10/min, guest 20/min, `/api/auth/me` 120/min.
@@ -59,7 +60,7 @@ File: `src/rooms.ts`.
 - `RoomRegistry` stores `Game` objects in memory; identity is `playerId` (`usr_…` / `guest_…`).
 - `subscribe(listener)` is the only way to subscribe to changes; do not add a second mechanism.
 - `create`, `createBot`, `join`, `attach`, `detach`, `leave`, `move`, `rematch`, `sweep`.
-- `join` is idempotent for a player who has already joined.
+- `join` is idempotent for a player who has already joined and returns `created: false` (the HTTP route answers `200` instead of `201`).
 - `detach` starts the grace period; afterwards the game becomes `abandoned` or the waiting room is deleted.
 - On `abandoned`, the winner is set only if the opponent stayed connected.
 - `sweep` deletes rooms without connected players after the TTL; a bot counts as disconnected for this purpose (`hasHumanConnected`).
@@ -85,13 +86,13 @@ File: `src/ws.ts`.
 
 File: `src/history.ts`; routes — `src/profile.ts`.
 
-- `record(game)` is called through a `RoomRegistry` subscription and is idempotent.
+- `record(game)` is called through a `RoomRegistry` subscription and is idempotent. The subscription retries briefly on `SQLITE_BUSY`/`SQLITE_LOCKED`; other failures are logged with `gameId`/`round`.
 - Only `finished`/`abandoned` games with two players and at least one `usr_…` are recorded.
 - A guest-vs-guest game is not recorded. A `mode: 'bot'` game is not recorded at all.
 - `resultFor`: win/loss/draw for finished games; win/abandoned for abandoned games.
 - Rating applies only when `status === 'finished'`, `winner !== null`, and both players are `usr_…`. Read both ratings before writing either; store `rating_before`/`rating_after` per mark; update `best_rating` with `MAX` and increment `rated_games`.
 - `stats` and `list` read only the current user's rows in `match_players`; `stats` also reads the user's rating row and computes `rank` from the same ordering as the leaderboard.
-- `leaderboard(limit, offset, meId)` uses `ROW_NUMBER() OVER (ORDER BY rating DESC, rated_games DESC, created_at ASC)` and filters `rated_games > 0`. Return only name/rating/record/position/`isMe` — never user IDs. `me` must use the same W/L/D subqueries as the page rows.
+- `leaderboard(limit, offset, meId)` uses `ROW_NUMBER() OVER (ORDER BY rating DESC, rated_games DESC, created_at ASC, id ASC)` and filters `rated_games > 0`. W/L/D count only `matches.rated = 1`, so `games = wins + losses + draws`. Return only name/rating/record/position/`isMe` — never user IDs. `me` must use the same W/L/D subqueries as the page rows.
 - Do not rely on the subscriber order between WS and history: deduplication is guaranteed by the unique index, not by call order.
 
 ## Errors
@@ -99,6 +100,8 @@ File: `src/history.ts`; routes — `src/profile.ts`.
 - Domain errors are `GameError` from `@ttt/shared`.
 - HTTP statuses live in `src/errors.ts` (`statusByCode`).
 - Add a new error code to `packages/shared/src/types.ts` and to `statusByCode`.
+- Fastify's 413/415 are mapped to `PAYLOAD_TOO_LARGE`/`UNSUPPORTED_MEDIA_TYPE`; other non-domain 4xx keep their status but use `BAD_REQUEST`.
+- `onSend` adds `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, and HSTS over HTTPS.
 - Do not expose stack traces or internal SQLite details.
 
 ## Tests

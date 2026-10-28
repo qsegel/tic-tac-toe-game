@@ -25,7 +25,7 @@ Use the `.js` suffix for imports inside the package (ESM).
 - `applyMove`: validates status, version, membership, turn, index, and cell occupancy.
 - A win or a full board moves the game to `finished`; `winner` is `X`, `O`, or `draw`.
 - `abandoned` is set by the server, never by the client.
-- `sanitizeName`: trims to 20 characters, collapses whitespace, strips control characters; an empty name becomes `null`.
+- `sanitizeName`: trims to 20 code points, collapses whitespace, strips control characters, zero-width and bidi-override characters; an empty name becomes `null`.
 
 ## Bot and rating
 

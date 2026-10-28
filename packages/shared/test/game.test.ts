@@ -224,6 +224,16 @@ test('sanitizeName: обрезает, схлопывает пробелы и о�
   assert.equal(sanitizeName('a\u0000b'), 'a b');
 });
 
+test('sanitizeName: не рвёт эмодзи и вырезает zero-width/bidi', () => {
+  const emojiAtBoundary = 'a'.repeat(19) + '😀' + 'b';
+  const cleaned = sanitizeName(emojiAtBoundary);
+  assert.equal(cleaned, 'a'.repeat(19) + '😀');
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  assert.ok(!loneSurrogate.test(cleaned ?? ''), 'имя не должно содержать одиночный суррогат');
+
+  assert.equal(sanitizeName('A\u200bB\u202eC\u2066D'), 'A B C D');
+});
+
 test('toPublicGame: не отдаёт playerId', () => {
   const game = newPlayingGame();
   const pub = toPublicGame(game);

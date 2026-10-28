@@ -60,7 +60,7 @@ const RANKED_USERS = `
   WITH ranked AS (
     SELECT id, name, rating, rated_games, created_at,
            ROW_NUMBER() OVER (
-             ORDER BY rating DESC, rated_games DESC, created_at ASC
+             ORDER BY rating DESC, rated_games DESC, created_at ASC, id ASC
            ) AS position
     FROM users
     WHERE rated_games > 0
@@ -91,8 +91,11 @@ export class MatchHistory {
     const rated =
       game.status === 'finished' && game.winner !== null && xUser !== null && oUser !== null;
 
-    this.db.exec('BEGIN IMMEDIATE');
+    let inTransaction = false;
     try {
+      this.db.exec('BEGIN IMMEDIATE');
+      inTransaction = true;
+
       const inserted = this.db
         .prepare(
           `INSERT OR IGNORE INTO matches (game_id, round, code, status, winner, finished_at, rated)
@@ -102,6 +105,7 @@ export class MatchHistory {
 
       if (Number(inserted.changes) === 0) {
         this.db.exec('ROLLBACK');
+        inTransaction = false;
         return;
       }
 
@@ -129,8 +133,15 @@ export class MatchHistory {
       }
 
       this.db.exec('COMMIT');
+      inTransaction = false;
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      if (inTransaction) {
+        try {
+          this.db.exec('ROLLBACK');
+        } catch {
+          // Соединение могло уже закрыться — исходную ошибку важнее не потерять.
+        }
+      }
       throw error;
     }
   }
@@ -237,9 +248,12 @@ export class MatchHistory {
            r.name,
            r.rating,
            r.rated_games,
-           (SELECT COUNT(*) FROM match_players mp WHERE mp.user_id = r.id AND mp.result = 'win') AS wins,
-           (SELECT COUNT(*) FROM match_players mp WHERE mp.user_id = r.id AND mp.result = 'loss') AS losses,
-           (SELECT COUNT(*) FROM match_players mp WHERE mp.user_id = r.id AND mp.result = 'draw') AS draws
+           (SELECT COUNT(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id
+             WHERE mp.user_id = r.id AND m.rated = 1 AND mp.result = 'win') AS wins,
+           (SELECT COUNT(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id
+             WHERE mp.user_id = r.id AND m.rated = 1 AND mp.result = 'loss') AS losses,
+           (SELECT COUNT(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id
+             WHERE mp.user_id = r.id AND m.rated = 1 AND mp.result = 'draw') AS draws
          FROM ranked r
          ORDER BY r.position
          LIMIT ? OFFSET ?`,
@@ -312,6 +326,14 @@ export class MatchHistory {
       )
       .run(rating, rating, userId);
   }
+}
+
+/** Ошибка блокировки SQLite: имеет смысл повторить запись. */
+export function isSqliteBusy(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && /SQLITE_BUSY|SQLITE_LOCKED/.test(code)) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /SQLITE_BUSY|SQLITE_LOCKED|database is locked/i.test(message);
 }
 
 function toEntry(row: LeaderboardRow, isMe: boolean): LeaderboardEntry {

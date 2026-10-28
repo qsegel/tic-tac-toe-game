@@ -11,6 +11,8 @@ export type BotDifficulty = 'easy' | 'medium' | 'hard';
 
 export type ErrorCode =
   | 'BAD_REQUEST'
+  | 'PAYLOAD_TOO_LARGE'
+  | 'UNSUPPORTED_MEDIA_TYPE'
   | 'NOT_FOUND'
   | 'INVALID_TOKEN'
   | 'UNAUTHORIZED'
